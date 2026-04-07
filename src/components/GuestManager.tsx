@@ -1,11 +1,12 @@
 import { useState, useMemo, useRef } from "react";
 import {
   Search, UserPlus, Trash2, CheckCircle, Clock, XCircle, LogIn,
-  Upload, Download, ChevronDown, CheckCheck, Map
+  Upload, Download, ChevronDown, CheckCheck, Map, Tag, Pencil
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn, normalizeString } from "@/lib/utils";
 import Papa from "papaparse";
 import * as XLSX from "xlsx";
@@ -32,21 +33,31 @@ export function GuestManager({ event, onAddGuest, onUpdateGuest, onDeleteGuest, 
   const [search, setSearch] = useState("");
   const [showForm, setShowForm] = useState(false);
   const [filterStatus, setFilterStatus] = useState<Guest["status"] | "all">("all");
+  const [filterTag, setFilterTag] = useState<string | "all">("all");
+  const [editingGuest, setEditingGuest] = useState<Guest | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const allTags = useMemo(() => {
+    const tags = new Set<string>();
+    event.guests.forEach(g => g.tags?.forEach(t => tags.add(t)));
+    return Array.from(tags).sort();
+  }, [event.guests]);
 
   const filtered = useMemo(() => {
     let list = event.guests;
     if (filterStatus !== "all") list = list.filter(g => g.status === filterStatus);
+    if (filterTag !== "all") list = list.filter(g => g.tags?.includes(filterTag));
     if (search.trim()) {
       const q = normalizeString(search);
       list = list.filter(g => 
         normalizeString(g.name).includes(q) || 
         normalizeString(g.phone || "").includes(q) ||
-        normalizeString(getTableName(g.tableId) || "").includes(q)
+        normalizeString(getTableName(g.tableId) || "").includes(q) ||
+        g.tags?.some(t => normalizeString(t).includes(q))
       );
     }
     return list;
-  }, [event.guests, search, filterStatus]);
+  }, [event.guests, search, filterStatus, filterTag]);
 
   const counts = useMemo(() => ({
     all:       event.guests.length,
@@ -146,6 +157,28 @@ export function GuestManager({ event, onAddGuest, onUpdateGuest, onDeleteGuest, 
             <span className="hidden sm:inline">Exportar</span>
           </Button>
           <Button
+            variant="outline"
+            className={cn(
+              "h-11 gap-2 border-border bg-background text-muted-foreground hover:bg-muted hover:text-foreground",
+              filterTag !== "all" && "border-amber-400 text-amber-600 bg-amber-400/5"
+            )}
+            onClick={() => {}}
+            title="Filtrar por etiqueta"
+          >
+            <Select value={filterTag} onValueChange={setFilterTag}>
+              <SelectTrigger className="border-none bg-transparent h-auto p-0 focus:ring-0 shadow-none">
+                <Tag className="h-4 w-4 mr-2" />
+                <span className="hidden sm:inline max-w-[80px] truncate">{filterTag === "all" ? "Etiqueta" : filterTag}</span>
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Todas las etiquetas</SelectItem>
+                {allTags.map(tag => (
+                  <SelectItem key={tag} value={tag}>{tag}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </Button>
+          <Button
             onClick={() => setShowForm(true)}
             className="h-11 bg-amber-400 hover:bg-amber-300 text-black font-semibold gap-2"
           >
@@ -206,10 +239,13 @@ export function GuestManager({ event, onAddGuest, onUpdateGuest, onDeleteGuest, 
                         </Badge>
                       )}
                     </div>
-                    <div className="flex items-center gap-2 mt-0.5">
-                      <p className="text-xs text-muted-foreground">{guest.phone || "Sin teléfono"}</p>
-                      <span className="text-muted-foreground/30">•</span>
-                      <p className="text-xs text-muted-foreground">{guest.companions > 0 ? `+${guest.companions} acompañantes` : "Individual"}</p>
+                    <div className="flex flex-wrap gap-1 mt-1">
+                      <p className="text-xs text-muted-foreground mr-2">{guest.phone || "Sin teléfono"}</p>
+                      {guest.tags?.map(tag => (
+                        <Badge key={tag} variant="secondary" className="text-[9px] py-0 h-3.5 bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 border-none">
+                          {tag}
+                        </Badge>
+                      ))}
                     </div>
                   </div>
 
@@ -249,8 +285,16 @@ export function GuestManager({ event, onAddGuest, onUpdateGuest, onDeleteGuest, 
                       </Button>
                     )}
                     <button
+                      onClick={() => setEditingGuest(guest)}
+                      className="h-8 w-8 rounded-lg flex items-center justify-center text-muted-foreground/40 hover:text-amber-500 hover:bg-amber-50 dark:hover:bg-amber-500/10 transition-all"
+                      title="Editar invitado"
+                    >
+                      <Pencil className="h-3.5 w-3.5" />
+                    </button>
+                    <button
                       onClick={() => onDeleteGuest(guest.id)}
                       className="h-8 w-8 rounded-lg flex items-center justify-center text-muted-foreground/40 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 transition-all"
+                      title="Eliminar invitado"
                     >
                       <Trash2 className="h-3.5 w-3.5" />
                     </button>
@@ -269,7 +313,22 @@ export function GuestManager({ event, onAddGuest, onUpdateGuest, onDeleteGuest, 
         </div>
       )}
 
-      <GuestForm open={showForm} onClose={() => setShowForm(false)} onSubmit={onAddGuest} />
+      <GuestForm 
+        key={editingGuest?.id || "new"}
+        open={showForm || !!editingGuest} 
+        onClose={() => {
+          setShowForm(false);
+          setEditingGuest(null);
+        }} 
+        onSubmit={(data) => {
+          if (editingGuest) {
+            onUpdateGuest(editingGuest.id, data);
+          } else {
+            onAddGuest(data);
+          }
+        }} 
+        initial={editingGuest || undefined}
+      />
     </div>
   );
 }

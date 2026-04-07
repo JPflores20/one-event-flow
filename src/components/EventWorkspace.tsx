@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
-import { ArrowLeft, MapPin, CalendarDays, Users, LogIn, PieChart, Sofa, Sparkles, Moon, Sun } from "lucide-react";
+import { ArrowLeft, MapPin, CalendarDays, Users, LogIn, PieChart, Sofa, Sparkles, Moon, Sun, CalendarPlus } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { GuestManager } from "./GuestManager";
 import { SeatingPlan } from "./SeatingPlan";
@@ -11,6 +12,7 @@ import { useTheme } from "@/hooks/useTheme";
 import { useAuth } from "@/hooks/useAuth";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
+import { getGoogleCalendarUrl } from "@/lib/utils";
 
 interface EventWorkspaceProps {
   event: EventData;
@@ -85,22 +87,43 @@ export function EventWorkspace({
           <div className="flex-1 min-w-0">
             <h1 className="text-base font-bold text-foreground truncate leading-tight">{event.name}</h1>
             <div className="flex items-center gap-3 text-xs text-muted-foreground">
-              <span className="flex items-center gap-1">
-                <CalendarDays className="h-3 w-3" />{formattedDate}
+              <span className="flex items-center gap-1.5 flex-wrap">
+                <CalendarDays className="h-3 w-3" /> {formattedDate}
+                <Badge className="bg-amber-400 text-black font-mono font-bold px-1.5 py-0 h-4 text-[9px] border-none uppercase shadow-sm">#{event.code}</Badge>
               </span>
               <span className="flex items-center gap-1 truncate">
                 <MapPin className="h-3 w-3" />{event.location}
               </span>
             </div>
           </div>
-          {/* Theme toggle */}
-          <button
-            onClick={toggleTheme}
-            className="p-2 rounded-lg border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-all shrink-0"
-            aria-label="Cambiar tema"
-          >
-            {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
-          </button>
+          <div className="flex items-center gap-2 shrink-0">
+            <a
+              href={getGoogleCalendarUrl(event)}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="hidden sm:flex items-center gap-2 h-9 px-4 rounded-lg bg-amber-400 hover:bg-amber-300 text-black font-semibold text-xs transition-all shadow-sm"
+              title="Añadir a Google Calendar"
+            >
+              <CalendarPlus className="h-4 w-4" />
+              <span>Mi Calendario</span>
+            </a>
+            <a
+              href={getGoogleCalendarUrl(event)}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="sm:hidden p-2 rounded-lg border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-all"
+              title="Añadir a Google Calendar"
+            >
+              <CalendarPlus className="h-4 w-4" />
+            </a>
+            <button
+              onClick={toggleTheme}
+              className="p-2 rounded-lg border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-all"
+              aria-label="Cambiar tema"
+            >
+              {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+            </button>
+          </div>
         </div>
       </header>
 

@@ -12,7 +12,8 @@ import {
   Search,
   UserPlus,
   ShieldCheck,
-  User
+  User,
+  CalendarPlus
 } from "lucide-react";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
@@ -46,7 +47,7 @@ import {
   AlertDialogTitle 
 } from "@/components/ui/alert-dialog";
 import { useState } from "react";
-import { cn, normalizeString } from "@/lib/utils";
+import { cn, normalizeString, getGoogleCalendarUrl } from "@/lib/utils";
 import { useTheme } from "@/hooks/useTheme";
 import type { EventData } from "@/hooks/useEventStore";
 
@@ -94,7 +95,8 @@ export function EventDashboard({ events, loading, onCreateEvent, onDeleteEvent, 
     const q = normalizeString(searchTerm);
     const matchesSearch = q
       ? normalizeString(e.name).includes(q) || 
-        normalizeString(e.location).includes(q)
+        normalizeString(e.location).includes(q) ||
+        normalizeString(e.code).includes(q)
       : true;
     return matchesDate && matchesSearch;
   });
@@ -280,7 +282,12 @@ export function EventDashboard({ events, loading, onCreateEvent, onDeleteEvent, 
                             <div className="p-5">
                               <div className="flex items-start justify-between mb-4">
                                 <div className="flex-1 min-w-0 pr-2">
-                                  <h3 className="font-bold text-foreground text-base leading-tight truncate">{event.name}</h3>
+                                  <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+                                    <h3 className="font-bold text-foreground text-lg leading-tight truncate">{event.name}</h3>
+                                    <Badge className="w-fit bg-amber-400/90 hover:bg-amber-400 text-black font-mono font-bold px-2 py-0.5 text-[11px] shadow-sm border-none uppercase">
+                                      #{event.code}
+                                    </Badge>
+                                  </div>
                                   <Badge
                                     className={cn(
                                       "mt-2 text-xs font-medium px-2 py-0.5",
@@ -293,18 +300,30 @@ export function EventDashboard({ events, loading, onCreateEvent, onDeleteEvent, 
                                     {active ? "● Activo" : "Pasado"}
                                   </Badge>
                                 </div>
-                                {role === "admin" && (
-                                  <button
-                                    className="h-8 w-8 rounded-lg flex items-center justify-center text-muted-foreground/40 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 opacity-0 group-hover:opacity-100 transition-all"
-                                    onClick={(e) => { 
-                                      e.stopPropagation(); 
-                                      setEventToDelete(event.id); 
-                                    }}
-                                    title="Eliminar evento"
-                                  >
-                                    <Trash2 className="h-4 w-4" />
-                                  </button>
-                                )}
+                                  <div className="flex items-center gap-1">
+                                    <a
+                                      href={getGoogleCalendarUrl(event)}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="h-8 w-8 rounded-lg border border-transparent flex items-center justify-center text-muted-foreground/60 hover:text-amber-500 hover:bg-amber-500/10 transition-all"
+                                      onClick={(e) => e.stopPropagation()}
+                                      title="Añadir a Google Calendar"
+                                    >
+                                      <CalendarPlus className="h-4 w-4" />
+                                    </a>
+                                    {role === "admin" && (
+                                      <button
+                                        className="h-8 w-8 rounded-lg flex items-center justify-center text-muted-foreground/40 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 opacity-0 group-hover:opacity-100 transition-all"
+                                        onClick={(e) => { 
+                                          e.stopPropagation(); 
+                                          setEventToDelete(event.id); 
+                                        }}
+                                        title="Eliminar evento"
+                                      >
+                                        <Trash2 className="h-4 w-4" />
+                                      </button>
+                                    )}
+                                  </div>
                               </div>
 
                               <div className="space-y-1.5 mb-4">

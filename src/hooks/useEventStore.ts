@@ -9,6 +9,7 @@ export interface Guest {
   status: "pending" | "confirmed" | "cancelled" | "arrived";
   companions: number;
   tableId: string | null;
+  tags?: string[];
 }
 
 export interface TimelineItem {
@@ -50,6 +51,7 @@ export interface EventData {
   tables: EventTable[];
   elements: EventElement[];
   timeline: TimelineItem[];
+  code: string;
   createdAt: string;
 }
 
@@ -63,11 +65,12 @@ export function useEventStore() {
       const data: EventData[] = [];
       snapshot.forEach((doc) => {
         const docData = doc.data() as EventData;
-        // Migration safeguard: if elements missing in old events, provide empty array []
+        // Migration safeguard: if elements/timeline missing in old events, provide defaults
         data.push({ 
           ...docData, 
           elements: docData.elements || [],
-          timeline: docData.timeline || []
+          timeline: docData.timeline || [],
+          code: docData.code || "000000" // Default code for old events
         });
       });
       setEvents(data);
@@ -87,6 +90,7 @@ export function useEventStore() {
       tables: [],
       elements: [],
       timeline: [],
+      code: Math.floor(100000 + Math.random() * 900000).toString(),
       createdAt: new Date().toISOString(),
     };
     await setDoc(doc(db, "events", newId), newEvent);
@@ -103,7 +107,11 @@ export function useEventStore() {
       const eventDoc = await transaction.get(eventRef);
       if (!eventDoc.exists()) throw "Document does not exist!";
       const data = eventDoc.data() as EventData;
-      const newGuest = { ...guest, id: crypto.randomUUID() };
+      const newGuest: Guest = { 
+        ...guest, 
+        id: crypto.randomUUID(), 
+        tags: guest.tags || [] 
+      };
       transaction.update(eventRef, { guests: [...data.guests, newGuest] });
     });
   }, []);

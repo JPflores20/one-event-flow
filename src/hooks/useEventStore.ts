@@ -1,10 +1,12 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
+import { collection, doc, onSnapshot, setDoc, deleteDoc, query, orderBy, runTransaction } from "firebase/firestore";
+import { db } from "../lib/firebase";
 
 export interface Guest {
   id: string;
   name: string;
   phone: string;
-  status: "pending" | "confirmed" | "cancelled";
+  status: "pending" | "confirmed" | "cancelled" | "arrived";
   companions: number;
   tableId: string | null;
 }
@@ -13,6 +15,23 @@ export interface EventTable {
   id: string;
   name: string;
   capacity: number;
+  x?: number;
+  y?: number;
+  width?: number;
+  height?: number;
+  shape?: "rect" | "square" | "circle";
+  color?: string;
+}
+
+export interface EventElement {
+  id: string;
+  name: string;
+  shape: "rect" | "square" | "circle";
+  x?: number;
+  y?: number;
+  width?: number;
+  height?: number;
+  color?: string;
 }
 
 export interface EventData {
@@ -22,109 +41,186 @@ export interface EventData {
   location: string;
   guests: Guest[];
   tables: EventTable[];
+  elements: EventElement[];
   createdAt: string;
 }
 
-const STORAGE_KEY = "one-events";
-
-function loadEvents(): EventData[] {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    return raw ? JSON.parse(raw) : [];
-  } catch {
-    return [];
-  }
-}
-
-function saveEvents(events: EventData[]) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(events));
-}
-
 export function useEventStore() {
-  const [events, setEvents] = useState<EventData[]>(loadEvents);
+  const [events, setEvents] = useState<EventData[]>([]);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    saveEvents(events);
-  }, [events]);
+    const q = query(collection(db, "events"), orderBy("createdAt", "desc"));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const data: EventData[] = [];
+      snapshot.forEach((doc) => {
+        const docData = doc.data() as EventData;
+        // Migration safeguard: if elements missing in old events, provide empty array []
+        data.push({ ...docData, elements: docData.elements || [] });
+      });
+      setEvents(data);
+      setLoading(false);
+    });
+    return () => unsubscribe();
+  }, []);
 
-  const createEvent = useCallback((name: string, date: string, location: string) => {
+  const createEvent = useCallback(async (name: string, date: string, location: string) => {
+    const newId = crypto.randomUUID();
     const newEvent: EventData = {
-      id: crypto.randomUUID(),
+      id: newId,
       name,
       date,
       location,
       guests: [],
       tables: [],
+      elements: [],
       createdAt: new Date().toISOString(),
     };
-    setEvents((prev) => [...prev, newEvent]);
-    return newEvent.id;
+    await setDoc(doc(db, "events", newId), newEvent);
+    return newId;
   }, []);
 
-  const deleteEvent = useCallback((eventId: string) => {
-    setEvents((prev) => prev.filter((e) => e.id !== eventId));
+  const deleteEvent = useCallback(async (eventId: string) => {
+    await deleteDoc(doc(db, "events", eventId));
   }, []);
 
-  const addGuest = useCallback((eventId: string, guest: Omit<Guest, "id">) => {
-    setEvents((prev) =>
-      prev.map((e) =>
-        e.id === eventId
-          ? { ...e, guests: [...e.guests, { ...guest, id: crypto.randomUUID() }] }
-          : e
-      )
-    );
+  const addGuest = useCallback(async (eventId: string, guest: Omit<Guest, "id">) => {
+    const eventRef = doc(db, "events", eventId);
+    await runTransaction(db, async (transaction) => {
+      const eventDoc = await transaction.get(eventRef);
+      if (!eventDoc.exists()) throw "Document does not exist!";
+      const data = eventDoc.data() as EventData;
+      const newGuest = { ...guest, id: crypto.randomUUID() };
+      transaction.update(eventRef, { guests: [...data.guests, newGuest] });
+    });
   }, []);
 
-  const updateGuest = useCallback((eventId: string, guestId: string, updates: Partial<Guest>) => {
-    setEvents((prev) =>
-      prev.map((e) =>
-        e.id === eventId
-          ? { ...e, guests: e.guests.map((g) => (g.id === guestId ? { ...g, ...updates } : g)) }
-          : e
-      )
-    );
+  const updateGuest = useCallback(async (eventId: string, guestId: string, updates: Partial<Guest>) => {
+    const eventRef = doc(db, "events", eventId);
+    await runTransaction(db, async (transaction) => {
+      const eventDoc = await transaction.get(eventRef);
+      if (!eventDoc.exists()) throw "Document does not exist!";
+      const data = eventDoc.data() as EventData;
+      const newGuests = data.guests.map(g => g.id === guestId ? { ...g, ...updates } : g);
+      transaction.update(eventRef, { guests: newGuests });
+    });
   }, []);
 
-  const deleteGuest = useCallback((eventId: string, guestId: string) => {
-    setEvents((prev) =>
-      prev.map((e) =>
-        e.id === eventId
-          ? { ...e, guests: e.guests.filter((g) => g.id !== guestId) }
-          : e
-      )
-    );
+  const deleteGuest = useCallback(async (eventId: string, guestId: string) => {
+    const eventRef = doc(db, "events", eventId);
+    await runTransaction(db, async (transaction) => {
+      const eventDoc = await transaction.get(eventRef);
+      if (!eventDoc.exists()) throw "Document does not exist!";
+      const data = eventDoc.data() as EventData;
+      const newGuests = data.guests.filter(g => g.id !== guestId);
+      transaction.update(eventRef, { guests: newGuests });
+    });
   }, []);
 
-  const addTable = useCallback((eventId: string, name: string, capacity: number) => {
-    setEvents((prev) =>
-      prev.map((e) =>
-        e.id === eventId
-          ? { ...e, tables: [...e.tables, { id: crypto.randomUUID(), name, capacity }] }
-          : e
-      )
-    );
+  const addTable = useCallback(async (eventId: string, name: string, capacity: number) => {
+    const eventRef = doc(db, "events", eventId);
+    await runTransaction(db, async (transaction) => {
+      const eventDoc = await transaction.get(eventRef);
+      if (!eventDoc.exists()) throw "Document does not exist!";
+      const data = eventDoc.data() as EventData;
+      const count = data.tables.length;
+      const newTable: EventTable = { 
+        id: crypto.randomUUID(), 
+        name, 
+        capacity,
+        x: count * 40, 
+        y: count * 30 
+      };
+      transaction.update(eventRef, { tables: [...data.tables, newTable] });
+    });
   }, []);
 
-  const deleteTable = useCallback((eventId: string, tableId: string) => {
-    setEvents((prev) =>
-      prev.map((e) =>
-        e.id === eventId
-          ? {
-              ...e,
-              tables: e.tables.filter((t) => t.id !== tableId),
-              guests: e.guests.map((g) => (g.tableId === tableId ? { ...g, tableId: null } : g)),
-            }
-          : e
-      )
-    );
+  const deleteTable = useCallback(async (eventId: string, tableId: string) => {
+    const eventRef = doc(db, "events", eventId);
+    await runTransaction(db, async (transaction) => {
+      const eventDoc = await transaction.get(eventRef);
+      if (!eventDoc.exists()) throw "Document does not exist!";
+      const data = eventDoc.data() as EventData;
+      const newTables = data.tables.filter(t => t.id !== tableId);
+      const newGuests = data.guests.map(g => g.tableId === tableId ? { ...g, tableId: null } : g);
+      transaction.update(eventRef, { tables: newTables, guests: newGuests });
+    });
   }, []);
 
-  const assignGuestToTable = useCallback((eventId: string, guestId: string, tableId: string | null) => {
-    updateGuest(eventId, guestId, { tableId });
+  const assignGuestToTable = useCallback(async (eventId: string, guestId: string, tableId: string | null) => {
+    await updateGuest(eventId, guestId, { tableId });
   }, [updateGuest]);
+
+  const importGuests = useCallback(async (eventId: string, newGuests: Omit<Guest, "id">[]) => {
+    const eventRef = doc(db, "events", eventId);
+    await runTransaction(db, async (transaction) => {
+      const eventDoc = await transaction.get(eventRef);
+      if (!eventDoc.exists()) throw "Document does not exist!";
+      const data = eventDoc.data() as EventData;
+      const guestsToAdd = newGuests.map(g => ({ ...g, id: crypto.randomUUID() }));
+      transaction.update(eventRef, { guests: [...data.guests, ...guestsToAdd] });
+    });
+  }, []);
+  
+  const replaceGuests = useCallback(async (eventId: string, allGuests: Guest[]) => {
+    const eventRef = doc(db, "events", eventId);
+    await runTransaction(db, async (transaction) => {
+       const eventDoc = await transaction.get(eventRef);
+       if (!eventDoc.exists()) return;
+       transaction.update(eventRef, { guests: allGuests });
+    });
+  }, []);
+
+  const updateTableProps = useCallback(async (eventId: string, tableId: string, updates: Partial<EventTable>) => {
+    const eventRef = doc(db, "events", eventId);
+    await runTransaction(db, async (transaction) => {
+      const eventDoc = await transaction.get(eventRef);
+      if (!eventDoc.exists()) return;
+      const data = eventDoc.data() as EventData;
+      const newTables = data.tables.map(t => t.id === tableId ? { ...t, ...updates } : t);
+      transaction.update(eventRef, { tables: newTables });
+    });
+  }, []);
+
+  const addElement = useCallback(async (eventId: string, name: string, shape: "rect" | "square" | "circle") => {
+    const eventRef = doc(db, "events", eventId);
+    await runTransaction(db, async (transaction) => {
+      const eventDoc = await transaction.get(eventRef);
+      if (!eventDoc.exists()) throw "Document does not exist!";
+      const data = eventDoc.data() as EventData;
+      const newElement: EventElement = { id: crypto.randomUUID(), name, shape };
+      const currentElements = data.elements || [];
+      transaction.update(eventRef, { elements: [...currentElements, newElement] });
+    });
+  }, []);
+
+  const deleteElement = useCallback(async (eventId: string, elementId: string) => {
+    const eventRef = doc(db, "events", eventId);
+    await runTransaction(db, async (transaction) => {
+      const eventDoc = await transaction.get(eventRef);
+      if (!eventDoc.exists()) throw "Document does not exist!";
+      const data = eventDoc.data() as EventData;
+      const currentElements = data.elements || [];
+      const newElements = currentElements.filter(e => e.id !== elementId);
+      transaction.update(eventRef, { elements: newElements });
+    });
+  }, []);
+
+  const updateElementProps = useCallback(async (eventId: string, elementId: string, updates: Partial<EventElement>) => {
+    const eventRef = doc(db, "events", eventId);
+    await runTransaction(db, async (transaction) => {
+      const eventDoc = await transaction.get(eventRef);
+      if (!eventDoc.exists()) return;
+      const data = eventDoc.data() as EventData;
+      const currentElements = data.elements || [];
+      const newElements = currentElements.map(e => e.id === elementId ? { ...e, ...updates } : e);
+      transaction.update(eventRef, { elements: newElements });
+    });
+  }, []);
 
   return {
     events,
+    loading,
     createEvent,
     deleteEvent,
     addGuest,
@@ -132,6 +228,12 @@ export function useEventStore() {
     deleteGuest,
     addTable,
     deleteTable,
+    updateTableProps,
     assignGuestToTable,
+    importGuests,
+    replaceGuests,
+    addElement,
+    deleteElement,
+    updateElementProps
   };
 }

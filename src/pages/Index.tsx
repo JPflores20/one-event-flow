@@ -25,6 +25,7 @@ const Index = () => {
         onAddElement={(name, shape) => store.addElement(selectedEvent.id, name, shape)}
         onDeleteElement={(elementId) => store.deleteElement(selectedEvent.id, elementId)}
         onUpdateElementProps={(elementId, updates) => store.updateElementProps(selectedEvent.id, elementId, updates)}
+        onUpdateTimeline={(eventId, timeline) => store.updateTimeline(eventId, timeline)}
       />
     );
   }

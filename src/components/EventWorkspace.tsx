@@ -1,11 +1,14 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { ArrowLeft, MapPin, CalendarDays, Users, LogIn, PieChart, Sofa, Sparkles, Moon, Sun } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { GuestManager } from "./GuestManager";
 import { SeatingPlan } from "./SeatingPlan";
-import type { EventData, Guest, EventTable, EventElement } from "@/hooks/useEventStore";
+import { AttendanceReport } from "./AttendanceReport";
+import { EventTimeline } from "./EventTimeline";
+import type { EventData, Guest, EventTable, EventElement, TimelineItem } from "@/hooks/useEventStore";
 import { useTheme } from "@/hooks/useTheme";
+import { useAuth } from "@/hooks/useAuth";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
 
@@ -23,13 +26,25 @@ interface EventWorkspaceProps {
   onAddElement: (name: string, shape: "rect" | "square" | "circle") => void;
   onDeleteElement: (elementId: string) => void;
   onUpdateElementProps: (elementId: string, updates: Partial<EventElement>) => void;
+  onUpdateTimeline: (eventId: string, timeline: TimelineItem[]) => void;
 }
 
 export function EventWorkspace({
   event, onBack, onAddGuest, onUpdateGuest, onDeleteGuest,
   onAddTable, onDeleteTable, onUpdateTableProps, onAssignGuest, onImportGuests,
-  onAddElement, onDeleteElement, onUpdateElementProps
+  onAddElement, onDeleteElement, onUpdateElementProps, onUpdateTimeline
 }: EventWorkspaceProps) {
+  const [activeTab, setActiveTab] = useState("guests");
+  const [highlightedTableId, setHighlightedTableId] = useState<string | null>(null);
+  
+  const handleFocusTable = (tableId: string) => {
+    setActiveTab("seating");
+    setHighlightedTableId(tableId);
+    // Clear highlight after a few seconds
+    setTimeout(() => setHighlightedTableId(null), 5000);
+  };
+
+  const { role } = useAuth();
   const { theme, toggleTheme } = useTheme();
   const formattedDate = format(new Date(event.date), "d 'de' MMMM, yyyy", { locale: es });
 
@@ -143,19 +158,31 @@ export function EventWorkspace({
         )}
 
         {/* Tabs */}
-        <Tabs defaultValue="guests" className="space-y-4">
-          <TabsList className="w-full grid grid-cols-2 bg-muted border border-border h-11 p-1">
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
+          <TabsList className="w-full grid grid-cols-4 bg-muted border border-border h-11 p-1">
             <TabsTrigger
               value="guests"
-              className="text-muted-foreground data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm rounded-md transition-all font-medium"
+              className="text-muted-foreground data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm rounded-md transition-all font-medium text-xs"
             >
               Invitados
             </TabsTrigger>
             <TabsTrigger
               value="seating"
-              className="text-muted-foreground data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm rounded-md transition-all font-medium"
+              className="text-muted-foreground data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm rounded-md transition-all font-medium text-xs"
             >
-              Mesas
+              Mesas / Plano
+            </TabsTrigger>
+            <TabsTrigger
+              value="timeline"
+              className="text-muted-foreground data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm rounded-md transition-all font-medium text-xs"
+            >
+              Cronograma
+            </TabsTrigger>
+            <TabsTrigger
+              value="reports"
+              className="text-muted-foreground data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm rounded-md transition-all font-medium text-xs"
+            >
+              Reportes
             </TabsTrigger>
           </TabsList>
           <TabsContent value="guests">
@@ -165,6 +192,7 @@ export function EventWorkspace({
               onUpdateGuest={onUpdateGuest}
               onDeleteGuest={onDeleteGuest}
               onImportGuests={onImportGuests}
+              onFocusTable={handleFocusTable}
             />
           </TabsContent>
           <TabsContent value="seating">
@@ -177,7 +205,17 @@ export function EventWorkspace({
               onAddElement={onAddElement}
               onDeleteElement={onDeleteElement}
               onUpdateElementProps={onUpdateElementProps}
+              highlightedTableId={highlightedTableId}
             />
+          </TabsContent>
+          <TabsContent value="timeline">
+            <EventTimeline 
+              event={event} 
+              onUpdateTimeline={onUpdateTimeline} 
+            />
+          </TabsContent>
+          <TabsContent value="reports">
+            <AttendanceReport event={event} />
           </TabsContent>
         </Tabs>
       </main>

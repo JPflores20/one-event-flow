@@ -8,10 +8,16 @@ import {
   Moon, 
   Sun, 
   LogOut,
-  Trash2
+  Trash2,
+  Search,
+  UserPlus,
+  ShieldCheck,
+  User
 } from "lucide-react";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
+import { doc, setDoc } from "firebase/firestore";
+import { db } from "@/lib/firebase";
 import { useAuth } from "@/hooks/useAuth";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
@@ -40,7 +46,7 @@ import {
   AlertDialogTitle 
 } from "@/components/ui/alert-dialog";
 import { useState } from "react";
-import { cn } from "@/lib/utils";
+import { cn, normalizeString } from "@/lib/utils";
 import { useTheme } from "@/hooks/useTheme";
 import type { EventData } from "@/hooks/useEventStore";
 
@@ -59,8 +65,12 @@ export function EventDashboard({ events, loading, onCreateEvent, onDeleteEvent, 
   const [location, setLocation] = useState("");
   const [eventToDelete, setEventToDelete] = useState<string | null>(null);
   const [selectedDashboardDate, setSelectedDashboardDate] = useState<Date | undefined>(undefined);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [showUserMgmt, setShowUserMgmt] = useState(false);
+  const [newEmail, setNewEmail] = useState("");
+  const [newRole, setNewRole] = useState<"admin" | "staff">("staff");
   const { theme, toggleTheme } = useTheme();
-  const { user, logout } = useAuth();
+  const { user, role, logout } = useAuth();
 
   const handleCreate = (e: React.FormEvent) => {
     e.preventDefault();
@@ -77,9 +87,17 @@ export function EventDashboard({ events, loading, onCreateEvent, onDeleteEvent, 
   const eventDates = events.map(e => new Date(new Date(e.date).toDateString()));
   const isEventDay = (day: Date) => eventDates.some(d => d.getTime() === day.getTime());
 
-  const filteredEvents = selectedDashboardDate 
-    ? events.filter(e => new Date(e.date).toDateString() === selectedDashboardDate.toDateString())
-    : events;
+  const filteredEvents = events.filter(e => {
+    const matchesDate = selectedDashboardDate 
+      ? new Date(e.date).toDateString() === selectedDashboardDate.toDateString()
+      : true;
+    const q = normalizeString(searchTerm);
+    const matchesSearch = q
+      ? normalizeString(e.name).includes(q) || 
+        normalizeString(e.location).includes(q)
+      : true;
+    return matchesDate && matchesSearch;
+  });
 
   if (loading) {
     return (
@@ -117,14 +135,16 @@ export function EventDashboard({ events, loading, onCreateEvent, onDeleteEvent, 
               {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
             </button>
 
-            <Button
-              onClick={() => setShowCreate(true)}
-              className="gap-2 bg-amber-400 hover:bg-amber-300 text-black font-semibold shadow-sm transition-all"
-            >
-              <Plus className="h-4 w-4" />
-              <span className="hidden sm:inline">Nuevo Evento</span>
-              <span className="sm:hidden">Nuevo</span>
-            </Button>
+            {role === "admin" && (
+              <Button
+                onClick={() => setShowCreate(true)}
+                className="gap-2 bg-amber-400 hover:bg-amber-300 text-black font-semibold shadow-sm transition-all"
+              >
+                <Plus className="h-4 w-4" />
+                <span className="hidden sm:inline">Nuevo Evento</span>
+                <span className="sm:hidden">Nuevo</span>
+              </Button>
+            )}
 
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -145,6 +165,20 @@ export function EventDashboard({ events, loading, onCreateEvent, onDeleteEvent, 
                   </div>
                 </DropdownMenuLabel>
                 <DropdownMenuSeparator />
+                
+                {role === "admin" && (
+                  <>
+                    <DropdownMenuItem 
+                      className="cursor-pointer"
+                      onClick={() => setShowUserMgmt(true)}
+                    >
+                      <UserPlus className="mr-2 h-4 w-4 text-amber-500" />
+                      <span>Gestionar Usuarios</span>
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                  </>
+                )}
+
                 <DropdownMenuItem 
                   className="text-red-500 focus:text-red-500 focus:bg-red-50 dark:focus:bg-red-500/10 cursor-pointer"
                   onClick={() => logout()}
@@ -163,6 +197,24 @@ export function EventDashboard({ events, loading, onCreateEvent, onDeleteEvent, 
         <div className="flex flex-col lg:flex-row gap-8">
           {/* Main List */}
           <div className="flex-1 min-w-0">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
+              <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
+                {selectedDashboardDate 
+                  ? `Eventos el ${format(selectedDashboardDate, 'd MMM', { locale: es })}` 
+                  : (searchTerm ? `Resultados: "${searchTerm}"` : `Todos los eventos (${events.length})`)}
+              </h2>
+
+              <div className="relative w-full md:w-64">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input
+                  placeholder="Buscar evento..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="pl-9 bg-card border-border h-9 text-xs focus:border-amber-400"
+                />
+              </div>
+            </div>
+
             {events.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-32 text-center">
                 <div className="w-20 h-20 rounded-2xl bg-muted border border-border flex items-center justify-center mb-6">
@@ -172,34 +224,33 @@ export function EventDashboard({ events, loading, onCreateEvent, onDeleteEvent, 
                 <p className="text-muted-foreground text-sm mb-8 max-w-xs">
                   Crea tu primer evento para comenzar a gestionar invitados y mesas.
                 </p>
-                <Button
-                  onClick={() => setShowCreate(true)}
-                  className="gap-2 bg-amber-400 hover:bg-amber-300 text-black font-semibold"
-                >
-                  <Plus className="h-4 w-4" /> Crear primer evento
-                </Button>
+                {role === "admin" && (
+                  <Button
+                    onClick={() => setShowCreate(true)}
+                    className="gap-2 bg-amber-400 hover:bg-amber-300 text-black font-semibold"
+                  >
+                    <Plus className="h-4 w-4" /> Crear primer evento
+                  </Button>
+                )}
               </div>
             ) : (
               <div className="space-y-4">
-                <div className="flex items-center justify-between mb-6">
-                  <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-widest">
-                    {selectedDashboardDate ? `Eventos el ${format(selectedDashboardDate, 'd MMM', { locale: es })}` : `Todos los eventos (${events.length})`}
-                  </h2>
-                  {selectedDashboardDate && (
+                {selectedDashboardDate && (
+                  <div className="flex items-center justify-end mb-2">
                     <Button 
                       variant="ghost" 
                       size="sm" 
                       onClick={() => setSelectedDashboardDate(undefined)}
-                      className="text-xs text-muted-foreground underline"
+                      className="text-xs text-muted-foreground underline h-auto p-0"
                     >
-                      Ver todos
+                      Ver todos los días
                     </Button>
-                  )}
-                </div>
+                  </div>
+                )}
                 
                 {filteredEvents.length === 0 ? (
-                   <div className="py-12 text-center border-2 border-dashed border-muted rounded-2xl">
-                      <p className="text-muted-foreground text-sm">No hay eventos para esta fecha.</p>
+                   <div className="py-12 text-center border-2 border-dashed border-muted rounded-2xl bg-muted/30">
+                      <p className="text-muted-foreground text-sm">No se encontraron eventos.</p>
                    </div>
                 ) : (
                   <div className="grid gap-4 sm:grid-cols-1 md:grid-cols-2">
@@ -242,16 +293,18 @@ export function EventDashboard({ events, loading, onCreateEvent, onDeleteEvent, 
                                     {active ? "● Activo" : "Pasado"}
                                   </Badge>
                                 </div>
-                                <button
-                                  className="h-8 w-8 rounded-lg flex items-center justify-center text-muted-foreground/40 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 opacity-0 group-hover:opacity-100 transition-all"
-                                  onClick={(e) => { 
-                                    e.stopPropagation(); 
-                                    setEventToDelete(event.id); 
-                                  }}
-                                  title="Eliminar evento"
-                                >
-                                  <Trash2 className="h-4 w-4" />
-                                </button>
+                                {role === "admin" && (
+                                  <button
+                                    className="h-8 w-8 rounded-lg flex items-center justify-center text-muted-foreground/40 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 opacity-0 group-hover:opacity-100 transition-all"
+                                    onClick={(e) => { 
+                                      e.stopPropagation(); 
+                                      setEventToDelete(event.id); 
+                                    }}
+                                    title="Eliminar evento"
+                                  >
+                                    <Trash2 className="h-4 w-4" />
+                                  </button>
+                                )}
                               </div>
 
                               <div className="space-y-1.5 mb-4">
@@ -435,6 +488,86 @@ export function EventDashboard({ events, loading, onCreateEvent, onDeleteEvent, 
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* User Management Dialog */}
+      <Dialog open={showUserMgmt} onOpenChange={setShowUserMgmt}>
+        <DialogContent className="sm:max-w-md bg-card border-border">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+               <ShieldCheck className="h-5 w-5 text-amber-500" />
+               Gestión de Accesos
+            </DialogTitle>
+          </DialogHeader>
+          
+          <div className="space-y-6 pt-4">
+            <div className="space-y-4">
+              <h4 className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Agregar Miembro</h4>
+              <div className="flex flex-col gap-3">
+                <div className="space-y-1.5">
+                  <Label htmlFor="user-email">Correo Electrónico</Label>
+                  <Input 
+                    id="user-email"
+                    type="email"
+                    placeholder="correo@ejemplo.com"
+                    value={newEmail}
+                    onChange={(e) => setNewEmail(e.target.value)}
+                    className="bg-background border-border"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Rol del Usuario</Label>
+                  <div className="flex gap-2">
+                    <Button 
+                      type="button"
+                      variant={newRole === "staff" ? "default" : "outline"}
+                      onClick={() => setNewRole("staff")}
+                      className={cn("flex-1 h-9", newRole === "staff" && "bg-amber-400 text-black hover:bg-amber-300")}
+                    >
+                      Staff
+                    </Button>
+                    <Button 
+                      type="button"
+                      variant={newRole === "admin" ? "default" : "outline"}
+                      onClick={() => setNewRole("admin")}
+                      className={cn("flex-1 h-9", newRole === "admin" && "bg-black text-white hover:bg-zinc-800")}
+                    >
+                      Admin
+                    </Button>
+                  </div>
+                </div>
+                <Button 
+                  className="w-full bg-amber-400 hover:bg-amber-300 text-black font-bold h-10 mt-2"
+                  onClick={async () => {
+                    if (!newEmail.trim()) return;
+                    try {
+                      // Normalizing the email as an ID for authorization
+                      const authRef = doc(db, "authorized_emails", newEmail.toLowerCase().trim());
+                      await setDoc(authRef, {
+                        role: newRole,
+                        invitedBy: user?.email,
+                        createdAt: new Date().toISOString()
+                      });
+                      alert(`¡Éxito! ${newEmail} ahora tiene acceso como ${newRole}.`);
+                      setNewEmail("");
+                    } catch (e) {
+                      console.error(e);
+                      alert("Error al autorizar usuario. Verifica los permisos.");
+                    }
+                  }}
+                >
+                  <UserPlus className="h-4 w-4 mr-2" /> Autorizar Acceso
+                </Button>
+              </div>
+            </div>
+
+            <div className="pt-4 border-t border-border">
+              <p className="text-[10px] text-muted-foreground leading-relaxed italic">
+                 * Los usuarios administradores pueden ver todos los eventos y editarlos. El Staff solo puede ver y realizar check-in de invitados.
+              </p>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

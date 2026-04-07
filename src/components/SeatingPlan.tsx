@@ -1,6 +1,8 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useRef, useEffect } from "react";
+import { toPng } from "html-to-image";
+import { useAuth } from "@/hooks/useAuth";
 import { Rnd } from "react-rnd";
-import { Plus, Trash2, X, Users, GripVertical, Sofa, LayoutGrid, Map, Maximize2, Minimize2, Circle, Square, RectangleHorizontal, Settings2, Info } from "lucide-react";
+import { Plus, Trash2, X, Users, GripVertical, Sofa, LayoutGrid, Map, Maximize2, Minimize2, Circle, Square, RectangleHorizontal, Settings2, Info, Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -12,6 +14,7 @@ import { Separator } from "@/components/ui/separator";
 import { TableForm } from "./TableForm";
 import { ElementForm } from "./ElementForm";
 import type { EventData, EventTable, EventElement } from "@/hooks/useEventStore";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 
 const COLOR_PALETTE = [
@@ -35,17 +38,42 @@ interface SeatingPlanProps {
   onAddElement: (name: string, shape: "rect" | "square" | "circle") => void;
   onDeleteElement: (elementId: string) => void;
   onUpdateElementProps: (elementId: string, updates: Partial<EventElement>) => void;
+  highlightedTableId?: string | null;
 }
 
 export function SeatingPlan({ 
   event, onAddTable, onDeleteTable, onUpdateTableProps, onAssignGuest,
-  onAddElement, onDeleteElement, onUpdateElementProps
+  onAddElement, onDeleteElement, onUpdateElementProps,
+  highlightedTableId
 }: SeatingPlanProps) {
+  const { role } = useAuth();
   const [showTableForm, setShowTableForm] = useState(false);
   const [showElementForm, setShowElementForm] = useState(false);
   const [view, setView] = useState<"list" | "croquis">("list");
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [expandedTableId, setExpandedTableId] = useState<string | null>(null);
+  const croquisRef = useRef<HTMLDivElement>(null);
+
+  // Automatically switch to croquis view and fullscreen when a table is highlighted
+  useEffect(() => {
+    if (highlightedTableId) {
+      setView("croquis");
+      setIsFullscreen(true);
+    }
+  }, [highlightedTableId]);
+
+  const handleExportImage = async () => {
+    if (!croquisRef.current) return;
+    try {
+      const dataUrl = await toPng(croquisRef.current, { backgroundColor: 'transparent', quality: 1 });
+      const link = document.createElement('a');
+      link.download = `Plano_${event.name}_${new Date().getTime()}.png`;
+      link.href = dataUrl;
+      link.click();
+    } catch (err) {
+      console.error('oops, something went wrong!', err);
+    }
+  };
 
   const unassigned = useMemo(() => {
     return event.guests.filter((g) => !g.tableId && g.status !== "cancelled");
@@ -117,6 +145,14 @@ export function SeatingPlan({
         {/* Botones Flotantes del Croquis */}
         <div className="absolute top-4 right-4 z-20 flex gap-2">
           <Button 
+            variant="outline" 
+            size="sm" 
+            onClick={handleExportImage}
+            className="h-8 gap-2 bg-background border-border"
+          >
+            <Download className="h-3.5 w-3.5" /> Exportar Imagen
+          </Button>
+          <Button 
             variant="secondary" 
             size="icon" 
             onClick={() => setIsFullscreen(!isFullscreen)}
@@ -147,13 +183,17 @@ export function SeatingPlan({
           </div>
         )}
 
-        <div className={cn("absolute inset-0 overflow-auto", isFullscreen && "pt-12")}>
+        <div ref={croquisRef} className={cn("absolute inset-0 overflow-auto", isFullscreen && "pt-12")}>
           <div className="min-w-[2000px] min-h-[1500px] relative p-4">
             {/* RENDER MESAS */}
             {event.tables.map((table, index) => {
               const occupied = getOccupied(table.id);
               const isFull = occupied >= table.capacity;
               const isOverflown = occupied > table.capacity;
+              const colorObj = COLOR_PALETTE.find(c => c.class === table.color) || COLOR_PALETTE[0];
+              const guests = getTableGuests(table.id);
+              const pending = guests.filter(g => g.status === "pending").length;
+              const arrived = guests.filter(g => g.status === "arrived").length;
               
               const defaultWidth = 180;
               const defaultHeight = 120;
@@ -162,9 +202,6 @@ export function SeatingPlan({
               const isSquare = table.shape === "square";
               const forceAspect = isCircle || isSquare;
 
-              const tableColor = COLOR_PALETTE.find(c => c.class === table.color) || COLOR_PALETTE[0];
-
-              // Fallback staggered position if both x and y are missing/zero
               const initialX = table.x !== undefined ? table.x : (index * 40);
               const initialY = table.y !== undefined ? table.y : (index * 30);
 
@@ -185,90 +222,122 @@ export function SeatingPlan({
                   onDragStop={(e, d) => handleDragStop(table.id, d)}
                   onResizeStop={(e, direction, ref, delta, position) => handleResizeStop(table.id, ref, position)}
                   className={cn(
-                    "bg-card border-2 shadow-sm hover:shadow-md transition-shadow duration-200 z-10 flex flex-col group overflow-visible",
-                    isCircle ? "rounded-full" : "rounded-xl"
+                    "bg-card border-2 shadow-sm hover:shadow-md transition-all duration-300 z-10 flex flex-col group overflow-visible",
+                    isCircle ? "rounded-full" : "rounded-xl",
+                    highlightedTableId === table.id && "ring-8 ring-offset-4 ring-offset-background z-50 scale-110"
                   )}
                   style={{
-                    borderColor: isFull 
-                      ? (isOverflown ? "#ef4444" : "#10b981") 
-                      : (table.color ? tableColor.hex + "80" : undefined)
+                    borderColor: highlightedTableId === table.id 
+                      ? colorObj.hex 
+                      : (isFull 
+                          ? (isOverflown ? "#ef4444" : "#10b981") 
+                          : (table.color ? colorObj.hex + "80" : undefined)),
+                    boxShadow: highlightedTableId === table.id 
+                      ? `0 0 40px ${colorObj.hex}` 
+                      : undefined,
+                    transition: "all 0.4s cubic-bezier(0.4, 0, 0.2, 1)"
                   }}
                 >
-                  <div className={cn(
-                    "flex-1 flex flex-col items-center justify-center relative p-3 w-full h-full",
-                     isCircle && "px-6"
-                  )}>
-                    <div className="drag-handle absolute top-0 left-0 right-0 p-2 flex items-center justify-between cursor-grab active:cursor-grabbing opacity-80 hover:opacity-100">
-                       <GripVertical className="h-4 w-4 text-muted-foreground/40 shrink-0" />
-                       <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" size="icon" className="h-6 w-6 rounded-full text-muted-foreground hover:bg-muted shrink-0 z-50 relative pointer-events-auto">
-                            <Settings2 className="h-3.5 w-3.5" />
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end" className="w-56 z-[100]">
-                          <DropdownMenuLabel className="text-xs">Forma</DropdownMenuLabel>
-                          <DropdownMenuItem onClick={() => handleChangeShape(table.id, "rect")}>
-                            <RectangleHorizontal className="mr-2 h-4 w-4" /> Rectangular
-                          </DropdownMenuItem>
-                          <DropdownMenuItem onClick={() => handleChangeShape(table.id, "square")}>
-                            <Square className="mr-2 h-4 w-4" /> Cuadrada
-                          </DropdownMenuItem>
-                          <DropdownMenuItem onClick={() => handleChangeShape(table.id, "circle")}>
-                            <Circle className="mr-2 h-4 w-4" /> Circular
-                          </DropdownMenuItem>
-                          <DropdownMenuSeparator />
-                          <DropdownMenuLabel className="text-[10px] uppercase tracking-wider text-muted-foreground">Color</DropdownMenuLabel>
-                          <div className="grid grid-cols-5 gap-1.5 p-2">
-                            {COLOR_PALETTE.map((c) => (
-                              <button
-                                key={c.class}
-                                onClick={() => handleChangeColor(table.id, c.class)}
-                                className={cn(
-                                  "h-6 w-6 rounded-full border border-black/10 transition-transform hover:scale-110",
-                                  table.color === c.class && "ring-2 ring-offset-1 ring-primary shadow-sm"
-                                )}
-                                style={{ backgroundColor: c.hex }}
-                                title={c.name}
-                              />
-                            ))}
+                  <TooltipProvider>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <div className={cn(
+                          "flex-1 flex flex-col items-center justify-center relative p-3 w-full h-full",
+                          isCircle && "px-6"
+                        )}>
+                          <div className="drag-handle absolute top-0 left-0 right-0 p-2 flex items-center justify-between cursor-grab active:cursor-grabbing opacity-80 hover:opacity-100">
+                             <GripVertical className="h-4 w-4 text-muted-foreground/40 shrink-0" />
+                             <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button variant="ghost" size="icon" className="h-6 w-6 rounded-full text-muted-foreground hover:bg-muted shrink-0 z-50 relative pointer-events-auto">
+                                  <Settings2 className="h-3.5 w-3.5" />
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end" className="w-56 z-[100]">
+                                <DropdownMenuLabel className="text-xs">Forma</DropdownMenuLabel>
+                                <DropdownMenuItem onClick={() => handleChangeShape(table.id, "rect")}>
+                                  <RectangleHorizontal className="mr-2 h-4 w-4" /> Rectangular
+                                </DropdownMenuItem>
+                                <DropdownMenuItem onClick={() => handleChangeShape(table.id, "square")}>
+                                  <Square className="mr-2 h-4 w-4" /> Cuadrada
+                                </DropdownMenuItem>
+                                <DropdownMenuItem onClick={() => handleChangeShape(table.id, "circle")}>
+                                  <Circle className="mr-2 h-4 w-4" /> Circular
+                                </DropdownMenuItem>
+                                <DropdownMenuSeparator />
+                                <DropdownMenuLabel className="text-[10px] uppercase tracking-wider text-muted-foreground">Color</DropdownMenuLabel>
+                                <div className="grid grid-cols-5 gap-1.5 p-2">
+                                  {COLOR_PALETTE.map((c) => (
+                                    <button
+                                      key={c.class}
+                                      onClick={() => handleChangeColor(table.id, c.class)}
+                                      className={cn(
+                                        "h-6 w-6 rounded-full border border-black/10 transition-transform hover:scale-110",
+                                        table.color === c.class && "ring-2 ring-offset-1 ring-primary shadow-sm"
+                                      )}
+                                      style={{ backgroundColor: c.hex }}
+                                      title={c.name}
+                                    />
+                                  ))}
+                                </div>
+                                <DropdownMenuSeparator />
+                                <DropdownMenuItem onClick={() => onDeleteTable(table.id)} className="text-red-500 focus:bg-red-50 focus:text-red-600 dark:focus:bg-red-950/50">
+                                  <Trash2 className="mr-2 h-4 w-4" /> Eliminar Mesa
+                                </DropdownMenuItem>
+                              </DropdownMenuContent>
+                            </DropdownMenu>
                           </div>
-                          <DropdownMenuSeparator />
-                          <DropdownMenuItem onClick={() => onDeleteTable(table.id)} className="text-red-500 focus:bg-red-50 focus:text-red-600 dark:focus:bg-red-950/50">
-                            <Trash2 className="mr-2 h-4 w-4" /> Eliminar Mesa
-                          </DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    </div>
-                    <div className="text-center mt-2 pointer-events-none select-none">
-                       <h5 
-                        className="font-bold text-sm truncate max-w-[90%] mx-auto leading-tight mb-1"
-                        style={{ color: !isFull && table.color ? tableColor.hex : undefined }}
-                       >
-                        {table.name}
-                       </h5>
-                       <div className="flex items-end justify-center gap-1">
-                          <span 
-                            className="text-2xl font-bold leading-none"
-                            style={{ color: isFull ? (isOverflown ? "#ef4444" : "#10b981") : (table.color ? tableColor.hex : undefined) }}
-                          >
-                            {occupied}
-                          </span>
-                          <span className="text-xs text-muted-foreground font-medium pb-[2px]"> / {table.capacity}</span>
-                       </div>
-                       
-                       {/* BOTÓN PARA ABRIR MODAL DE INVITADOS */}
-                       <Button 
-                          variant="ghost" 
-                          size="sm" 
-                          className="mt-2 h-7 gap-1 text-[10px] uppercase font-bold pointer-events-auto hover:bg-muted"
-                          onClick={() => setExpandedTableId(table.id)}
-                       >
-                          <Users className="h-3 w-3" />
-                          Ver Invitados
-                       </Button>
-                    </div>
-                  </div>
+                          <div className="text-center mt-2 pointer-events-none select-none">
+                             <h5 
+                              className="font-bold text-sm truncate max-w-[90%] mx-auto leading-tight mb-1"
+                              style={{ color: !isFull && table.color ? colorObj.hex : undefined }}
+                             >
+                              {table.name}
+                             </h5>
+                             <div className="flex items-end justify-center gap-1">
+                                <span 
+                                  className="text-2xl font-bold leading-none"
+                                  style={{ color: isFull ? (isOverflown ? "#ef4444" : "#10b981") : (table.color ? colorObj.hex : undefined) }}
+                                >
+                                  {occupied}
+                                </span>
+                                <span className="text-xs text-muted-foreground font-medium pb-[2px]"> / {table.capacity}</span>
+                             </div>
+                             
+                             <Button 
+                                variant="ghost" 
+                                size="sm" 
+                                className="mt-2 h-7 gap-1 text-[10px] uppercase font-bold pointer-events-auto hover:bg-muted"
+                                onClick={() => setExpandedTableId(table.id)}
+                             >
+                                <Users className="h-3 w-3" />
+                                Ver Invitados
+                             </Button>
+                          </div>
+                        </div>
+                      </TooltipTrigger>
+                      <TooltipContent side="top" className="p-3 w-56 flex flex-col gap-2 bg-card border-border shadow-xl">
+                        <div className="flex items-center justify-between border-b border-border pb-2">
+                          <span className="font-bold text-sm uppercase">Mesa {table.name}</span>
+                          <Badge variant="outline" className="text-[10px]">{occupied} / {table.capacity}</Badge>
+                        </div>
+                        <div className="space-y-2">
+                           <div className="flex justify-between text-xs">
+                             <span className="text-muted-foreground">Confirmados:</span>
+                             <span className="font-semibold text-blue-500">{arrived + guests.filter(g => g.status === "confirmed").length}</span>
+                           </div>
+                           <div className="flex justify-between text-xs">
+                             <span className="text-muted-foreground text-[10px] translate-x-3">• Ya ingresaron:</span>
+                             <span className="font-bold text-green-500">{arrived}</span>
+                           </div>
+                           <div className="flex justify-between text-xs">
+                             <span className="text-muted-foreground">Pendientes:</span>
+                             <span className="font-semibold text-amber-500">{pending}</span>
+                           </div>
+                        </div>
+                      </TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
                 </Rnd>
               );
             })}
@@ -385,23 +454,23 @@ export function SeatingPlan({
                 <TabsTrigger value="croquis" className="text-xs gap-2"><Map className="h-3.5 w-3.5" /> Croquis</TabsTrigger>
               </TabsList>
             </Tabs>
-            <Button 
-              onClick={() => setShowElementForm(true)} 
-              variant="outline"
-              className="gap-2 font-semibold shadow-sm border-dashed"
-            >
-              <Plus className="h-4 w-4" /> 
-              <span className="hidden sm:inline">Añadir Elemento</span>
-              <span className="sm:hidden">Elem</span>
-            </Button>
-            <Button 
-              onClick={() => setShowTableForm(true)} 
-              className="gap-2 bg-amber-400 hover:bg-amber-300 text-black font-semibold shadow-sm"
-            >
-              <Plus className="h-4 w-4" /> 
-              <span className="hidden sm:inline">Nueva Mesa</span>
-              <span className="sm:hidden">Mesa</span>
-            </Button>
+            {role === "admin" && (
+              <div className="flex flex-wrap gap-2">
+                <Button 
+                  onClick={() => setShowTableForm(true)}
+                  className="bg-amber-400 hover:bg-amber-300 text-black font-semibold h-9"
+                >
+                  <Plus className="h-4 w-4 mr-2" /> Agregar Mesa
+                </Button>
+                <Button 
+                  variant="outline"
+                  onClick={() => setShowElementForm(true)}
+                  className="h-9 border-border bg-card text-foreground"
+                >
+                  <Plus className="h-4 w-4 mr-2" /> Agregar Elemento
+                </Button>
+              </div>
+            )}
           </div>
         </div>
       )}

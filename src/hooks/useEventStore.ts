@@ -11,6 +11,13 @@ export interface Guest {
   tableId: string | null;
 }
 
+export interface TimelineItem {
+  id: string;
+  time: string;
+  activity: string;
+  completed?: boolean;
+}
+
 export interface EventTable {
   id: string;
   name: string;
@@ -42,6 +49,7 @@ export interface EventData {
   guests: Guest[];
   tables: EventTable[];
   elements: EventElement[];
+  timeline: TimelineItem[];
   createdAt: string;
 }
 
@@ -56,7 +64,11 @@ export function useEventStore() {
       snapshot.forEach((doc) => {
         const docData = doc.data() as EventData;
         // Migration safeguard: if elements missing in old events, provide empty array []
-        data.push({ ...docData, elements: docData.elements || [] });
+        data.push({ 
+          ...docData, 
+          elements: docData.elements || [],
+          timeline: docData.timeline || []
+        });
       });
       setEvents(data);
       setLoading(false);
@@ -74,6 +86,7 @@ export function useEventStore() {
       guests: [],
       tables: [],
       elements: [],
+      timeline: [],
       createdAt: new Date().toISOString(),
     };
     await setDoc(doc(db, "events", newId), newEvent);
@@ -234,6 +247,14 @@ export function useEventStore() {
     replaceGuests,
     addElement,
     deleteElement,
-    updateElementProps
+    updateElementProps,
+    updateTimeline: useCallback(async (eventId: string, timeline: TimelineItem[]) => {
+      const eventRef = doc(db, "events", eventId);
+      await runTransaction(db, async (transaction) => {
+        const eventDoc = await transaction.get(eventRef);
+        if (!eventDoc.exists()) return;
+        transaction.update(eventRef, { timeline });
+      });
+    }, [])
   };
 }

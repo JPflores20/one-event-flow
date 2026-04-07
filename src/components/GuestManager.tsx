@@ -1,11 +1,12 @@
 import { useState, useMemo, useRef } from "react";
 import {
   Search, UserPlus, Trash2, CheckCircle, Clock, XCircle, LogIn,
-  Upload, Download, ChevronDown, CheckCheck
+  Upload, Download, ChevronDown, CheckCheck, Map
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
+import { Badge } from "@/components/ui/badge";
+import { cn, normalizeString } from "@/lib/utils";
 import Papa from "papaparse";
 import * as XLSX from "xlsx";
 import { GuestForm } from "./GuestForm";
@@ -24,9 +25,10 @@ interface GuestManagerProps {
   onUpdateGuest: (guestId: string, updates: Partial<Guest>) => void;
   onDeleteGuest: (guestId: string) => void;
   onImportGuests: (guests: Omit<Guest, "id">[]) => void;
+  onFocusTable?: (tableId: string) => void;
 }
 
-export function GuestManager({ event, onAddGuest, onUpdateGuest, onDeleteGuest, onImportGuests }: GuestManagerProps) {
+export function GuestManager({ event, onAddGuest, onUpdateGuest, onDeleteGuest, onImportGuests, onFocusTable }: GuestManagerProps) {
   const [search, setSearch] = useState("");
   const [showForm, setShowForm] = useState(false);
   const [filterStatus, setFilterStatus] = useState<Guest["status"] | "all">("all");
@@ -36,8 +38,12 @@ export function GuestManager({ event, onAddGuest, onUpdateGuest, onDeleteGuest, 
     let list = event.guests;
     if (filterStatus !== "all") list = list.filter(g => g.status === filterStatus);
     if (search.trim()) {
-      const q = search.toLowerCase();
-      list = list.filter(g => g.name.toLowerCase().includes(q) || g.phone?.includes(q));
+      const q = normalizeString(search);
+      list = list.filter(g => 
+        normalizeString(g.name).includes(q) || 
+        normalizeString(g.phone || "").includes(q) ||
+        normalizeString(getTableName(g.tableId) || "").includes(q)
+      );
     }
     return list;
   }, [event.guests, search, filterStatus]);
@@ -109,7 +115,6 @@ export function GuestManager({ event, onAddGuest, onUpdateGuest, onDeleteGuest, 
 
   return (
     <div className="space-y-4">
-      {/* Top bar */}
       <div className="flex flex-col sm:flex-row gap-2">
         <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -150,7 +155,6 @@ export function GuestManager({ event, onAddGuest, onUpdateGuest, onDeleteGuest, 
         </div>
       </div>
 
-      {/* Filter tabs */}
       <div className="flex gap-1.5 overflow-x-auto pb-1">
         {filterTabs.map(tab => (
           <button
@@ -168,7 +172,6 @@ export function GuestManager({ event, onAddGuest, onUpdateGuest, onDeleteGuest, 
         ))}
       </div>
 
-      {/* Guest list */}
       <div className="rounded-xl border border-border overflow-hidden">
         {filtered.length === 0 ? (
           <div className="py-16 text-center text-muted-foreground bg-card">
@@ -178,9 +181,6 @@ export function GuestManager({ event, onAddGuest, onUpdateGuest, onDeleteGuest, 
         ) : (
           <div className="divide-y divide-border">
             {filtered.map((guest) => {
-              const cfg = statusConfig[guest.status];
-              const Icon = cfg.icon;
-              const tableName = getTableName(guest.tableId);
               const isArrived = guest.status === "arrived";
 
               return (
@@ -188,7 +188,6 @@ export function GuestManager({ event, onAddGuest, onUpdateGuest, onDeleteGuest, 
                   key={guest.id}
                   className="flex items-center gap-3 p-3.5 bg-card hover:bg-muted/50 transition-colors group"
                 >
-                  {/* Avatar */}
                   <div className={cn(
                     "w-9 h-9 rounded-full flex items-center justify-center shrink-0 text-sm font-bold border",
                     isArrived
@@ -198,37 +197,37 @@ export function GuestManager({ event, onAddGuest, onUpdateGuest, onDeleteGuest, 
                     {guest.name.charAt(0).toUpperCase()}
                   </div>
 
-                  {/* Info */}
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
-                      <span className={cn(
-                        "font-semibold text-sm truncate",
-                        isArrived ? "text-green-600 dark:text-green-400" : "text-foreground"
-                      )}>
-                        {guest.name}
-                      </span>
-                      {isArrived && <CheckCheck className="h-3.5 w-3.5 text-green-500 shrink-0" />}
+                      <p className="font-bold text-foreground text-sm truncate">{guest.name}</p>
+                      {guest.tableId && (
+                        <Badge variant="outline" className="bg-amber-50 dark:bg-amber-400/10 text-amber-600 dark:text-amber-400 border-amber-200 dark:border-amber-400/20 text-[10px] py-0 h-4">
+                          {getTableName(guest.tableId)}
+                        </Badge>
+                      )}
                     </div>
-                    <div className="flex items-center gap-2 text-xs text-muted-foreground mt-0.5">
-                      {guest.companions > 0 && <span>+{guest.companions} acomp.</span>}
-                      {tableName && <span className="font-medium text-foreground/70">Mesa {tableName}</span>}
-                      {guest.phone && <span className="hidden sm:inline">{guest.phone}</span>}
+                    <div className="flex items-center gap-2 mt-0.5">
+                      <p className="text-xs text-muted-foreground">{guest.phone || "Sin teléfono"}</p>
+                      <span className="text-muted-foreground/30">•</span>
+                      <p className="text-xs text-muted-foreground">{guest.companions > 0 ? `+${guest.companions} acompañantes` : "Individual"}</p>
                     </div>
                   </div>
 
-                  {/* Status badge (desktop) */}
-                  <div className="hidden md:block shrink-0">
-                    <span className={cn(
-                      "inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border",
-                      cfg.light, cfg.dark
-                    )}>
-                      <Icon className="h-3 w-3" />
-                      {cfg.label}
-                    </span>
-                  </div>
-
-                  {/* Action buttons */}
-                  <div className="flex items-center gap-1.5 shrink-0">
+                  <div className="flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                    {guest.tableId && onFocusTable && (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 text-amber-500 hover:text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-500/10"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onFocusTable(guest.tableId!);
+                        }}
+                        title="Ver en croquis"
+                      >
+                        <Map className="h-4 w-4" />
+                      </Button>
+                    )}
                     {!isArrived ? (
                       <Button
                         size="sm"
@@ -251,7 +250,7 @@ export function GuestManager({ event, onAddGuest, onUpdateGuest, onDeleteGuest, 
                     )}
                     <button
                       onClick={() => onDeleteGuest(guest.id)}
-                      className="h-8 w-8 rounded-lg flex items-center justify-center text-muted-foreground/40 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 opacity-0 group-hover:opacity-100 transition-all"
+                      className="h-8 w-8 rounded-lg flex items-center justify-center text-muted-foreground/40 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 transition-all"
                     >
                       <Trash2 className="h-3.5 w-3.5" />
                     </button>
@@ -263,7 +262,6 @@ export function GuestManager({ event, onAddGuest, onUpdateGuest, onDeleteGuest, 
         )}
       </div>
 
-      {/* Footer summary */}
       {event.guests.length > 0 && (
         <div className="flex items-center justify-between px-1 text-xs text-muted-foreground">
           <span>Mostrando {filtered.length} de {event.guests.length} invitados</span>

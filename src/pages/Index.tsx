@@ -1,16 +1,37 @@
-// Update this page (the content is just a fallback if you fail to update the page)
+import { useState } from "react";
+import { useEventStore } from "@/hooks/useEventStore";
+import { EventDashboard } from "@/components/EventDashboard";
+import { EventWorkspace } from "@/components/EventWorkspace";
 
-// IMPORTANT: Fully REPLACE this with your own code
-const PlaceholderIndex = () => {
-  // PLACEHOLDER: Replace this entire return statement with the user's app.
-  // The inline background color is intentionally not part of the design system.
+const Index = () => {
+  const store = useEventStore();
+  const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
+
+  const selectedEvent = store.events.find((e) => e.id === selectedEventId);
+
+  if (selectedEvent) {
+    return (
+      <EventWorkspace
+        event={selectedEvent}
+        onBack={() => setSelectedEventId(null)}
+        onAddGuest={(guest) => store.addGuest(selectedEvent.id, guest)}
+        onUpdateGuest={(guestId, updates) => store.updateGuest(selectedEvent.id, guestId, updates)}
+        onDeleteGuest={(guestId) => store.deleteGuest(selectedEvent.id, guestId)}
+        onAddTable={(name, capacity) => store.addTable(selectedEvent.id, name, capacity)}
+        onDeleteTable={(tableId) => store.deleteTable(selectedEvent.id, tableId)}
+        onAssignGuest={(guestId, tableId) => store.assignGuestToTable(selectedEvent.id, guestId, tableId)}
+      />
+    );
+  }
+
   return (
-    <div className="flex min-h-screen items-center justify-center" style={{ backgroundColor: '#fcfbf8' }}>
-      <img data-lovable-blank-page-placeholder="REMOVE_THIS" src="/placeholder.svg" alt="Your app will live here!" />
-    </div>
+    <EventDashboard
+      events={store.events}
+      onCreateEvent={store.createEvent}
+      onDeleteEvent={store.deleteEvent}
+      onSelectEvent={setSelectedEventId}
+    />
   );
 };
-
-const Index = PlaceholderIndex;
 
 export default Index;

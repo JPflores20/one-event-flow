@@ -7,19 +7,34 @@ import {
   Sparkles, 
   Moon, 
   Sun, 
-  LogOut,
-  Trash2,
-  Search,
-  UserPlus,
-  ShieldCheck,
-  User,
-  CalendarPlus
+  LogOut, 
+  Trash2, 
+  Search, 
+  UserPlus, 
+  ShieldCheck, 
+  User, 
+  CalendarPlus, 
+  Eye, 
+  EyeOff, 
+  Lock, 
+  Mail, 
+  Loader2, 
+  Check, 
+  Settings, 
+  Trash, 
+  AlertCircle, 
+  BarChart3, 
+  Calendar as CalendarIcon, 
+  Layout, 
+  DollarSign 
 } from "lucide-react";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
-import { doc, setDoc } from "firebase/firestore";
-import { db } from "@/lib/firebase";
-import { useAuth } from "@/hooks/useAuth";
+import { doc, setDoc, collection, getDocs, updateDoc, deleteDoc } from "firebase/firestore";
+import { initializeApp, deleteApp } from "firebase/app";
+import { getAuth, createUserWithEmailAndPassword } from "firebase/auth";
+import { db, firebaseConfig } from "@/lib/firebase";
+import { useAuth, DEFAULT_ADMIN_PERMISSIONS, DEFAULT_STAFF_PERMISSIONS, type UserPermissions } from "@/hooks/useAuth";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
   DropdownMenu,
@@ -46,7 +61,10 @@ import {
   AlertDialogHeader, 
   AlertDialogTitle 
 } from "@/components/ui/alert-dialog";
-import { useState } from "react";
+import { Switch } from "@/components/ui/switch";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { useState, useEffect } from "react";
 import { cn, normalizeString, getGoogleCalendarUrl } from "@/lib/utils";
 import { useTheme } from "@/hooks/useTheme";
 import type { EventData } from "@/hooks/useEventStore";
@@ -67,11 +85,71 @@ export function EventDashboard({ events, loading, onCreateEvent, onDeleteEvent, 
   const [eventToDelete, setEventToDelete] = useState<string | null>(null);
   const [selectedDashboardDate, setSelectedDashboardDate] = useState<Date | undefined>(undefined);
   const [searchTerm, setSearchTerm] = useState("");
+  
+  // User Management State
   const [showUserMgmt, setShowUserMgmt] = useState(false);
+  const [authorizedUsers, setAuthorizedUsers] = useState<any[]>([]);
+  const [isLoadingUsers, setIsLoadingUsers] = useState(false);
+  const [editingUserId, setEditingUserId] = useState<string | null>(null);
+  
   const [newEmail, setNewEmail] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [isRegistering, setIsRegistering] = useState(false);
   const [newRole, setNewRole] = useState<"admin" | "staff">("staff");
+  
   const { theme, toggleTheme } = useTheme();
   const { user, role, logout } = useAuth();
+
+  const fetchUsers = async () => {
+    setIsLoadingUsers(true);
+    try {
+      const querySnapshot = await getDocs(collection(db, "authorized_emails"));
+      const users = querySnapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      }));
+      setAuthorizedUsers(users);
+    } catch (error) {
+      console.error("Error fetching users:", error);
+    } finally {
+      setIsLoadingUsers(false);
+    }
+  };
+
+  useEffect(() => {
+    if (showUserMgmt) {
+      fetchUsers();
+    }
+  }, [showUserMgmt]);
+
+  const handleUpdateUser = async (email: string, updates: any) => {
+    try {
+      const userRef = doc(db, "authorized_emails", email);
+      await updateDoc(userRef, updates);
+      
+      // Also try to update the 'users' collection if the user has already logged in
+      // Note: We don't have the UID here easily, but we can search by email or wait for next login
+      // For now, updating authorized_emails is the source of truth for the next fetch/login.
+      
+      await fetchUsers();
+      setEditingUserId(null);
+    } catch (error) {
+      console.error("Error updating user:", error);
+      alert("Error al actualizar el usuario.");
+    }
+  };
+
+  const handleDeleteUser = async (email: string) => {
+    if (!confirm(`¿Estás seguro de que deseas eliminar el acceso a ${email}?`)) return;
+    try {
+      await deleteDoc(doc(db, "authorized_emails", email));
+      await fetchUsers();
+    } catch (error) {
+      console.error("Error deleting user:", error);
+      alert("Error al eliminar el acceso.");
+    }
+  };
 
   const handleCreate = (e: React.FormEvent) => {
     e.preventDefault();
@@ -199,20 +277,25 @@ export function EventDashboard({ events, loading, onCreateEvent, onDeleteEvent, 
         <div className="flex flex-col lg:flex-row gap-8">
           {/* Main List */}
           <div className="flex-1 min-w-0">
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
-              <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
-                {selectedDashboardDate 
-                  ? `Eventos el ${format(selectedDashboardDate, 'd MMM', { locale: es })}` 
-                  : (searchTerm ? `Resultados: "${searchTerm}"` : `Todos los eventos (${events.length})`)}
-              </h2>
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8 bg-white/50 dark:bg-slate-900/50 p-6 rounded-3xl border border-border shadow-sm">
+              <div>
+                <h2 className="text-xs font-black text-muted-foreground uppercase tracking-[0.2em] mb-1">
+                  Listado de Eventos
+                </h2>
+                <p className="text-2xl font-black text-foreground tracking-tight">
+                  {selectedDashboardDate 
+                    ? `Filtrado por: ${format(selectedDashboardDate, 'd MMM', { locale: es })}` 
+                    : (searchTerm ? `Búsqueda: "${searchTerm}"` : `Todos los eventos`)}
+                </p>
+              </div>
 
-              <div className="relative w-full md:w-64">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <div className="relative w-full md:w-80 group">
+                <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 group-focus-within:text-amber-500 transition-colors" />
                 <Input
-                  placeholder="Buscar evento..."
+                  placeholder="Buscar por nombre, lugar o código..."
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
-                  className="pl-9 bg-card border-border h-9 text-xs focus:border-amber-400"
+                  className="pl-11 bg-background border-slate-200 dark:border-slate-800 h-12 text-sm focus:border-amber-400 focus:ring-amber-400/20 rounded-2xl transition-all shadow-sm"
                 />
               </div>
             </div>
@@ -267,39 +350,40 @@ export function EventDashboard({ events, loading, onCreateEvent, onDeleteEvent, 
                           <div
                             key={event.id}
                             className={cn(
-                              "group relative rounded-2xl border overflow-hidden cursor-pointer transition-all duration-200",
+                              "group relative rounded-3xl border overflow-hidden cursor-pointer transition-all duration-300",
                               "bg-card border-border hover:border-amber-400/40",
-                              "hover:shadow-lg hover:-translate-y-0.5"
+                              "shadow-sm hover:shadow-2xl hover:-translate-y-1.5"
                             )}
                             onClick={() => onSelectEvent(event.id)}
                           >
+                            {/* Status label floating */}
+                            <div className="absolute top-4 left-4 z-10">
+                               <Badge
+                                  className={cn(
+                                    "text-[9px] font-black uppercase tracking-widest px-2.5 py-0.5 h-5 rounded-full border-none shadow-sm",
+                                    active
+                                      ? "bg-green-500 text-white animate-pulse"
+                                      : "bg-slate-200 text-slate-500 dark:bg-slate-800"
+                                  )}
+                                >
+                                  {active ? "Activo" : "Pasado"}
+                                </Badge>
+                            </div>
                             {/* Accent bar */}
                             <div className={cn(
-                              "h-1 w-full",
-                              active ? "bg-gradient-to-r from-amber-400 to-amber-500" : "bg-muted"
+                              "h-1.5 w-full",
+                              active ? "bg-gradient-to-r from-amber-400 to-amber-500" : "bg-slate-200 dark:bg-slate-800"
                             )} />
-
-                            <div className="p-5">
-                              <div className="flex items-start justify-between mb-4">
-                                <div className="flex-1 min-w-0 pr-2">
-                                  <div className="flex flex-col sm:flex-row sm:items-center gap-2">
-                                    <h3 className="font-bold text-foreground text-lg leading-tight truncate">{event.name}</h3>
-                                    <Badge className="w-fit bg-amber-400/90 hover:bg-amber-400 text-black font-mono font-bold px-2 py-0.5 text-[11px] shadow-sm border-none uppercase">
-                                      #{event.code}
-                                    </Badge>
+                            <div className="p-6 pt-8">
+                                <div className="flex items-start justify-between mb-4">
+                                  <div className="flex-1 min-w-0 pr-2">
+                                    <div className="space-y-1">
+                                      <h3 className="font-black text-foreground text-xl leading-tight tracking-tight group-hover:text-amber-600 transition-colors">{event.name}</h3>
+                                      <Badge className="w-fit bg-amber-400 text-black font-black px-2 py-0.5 text-[10px] shadow-sm border-none uppercase tracking-tighter">
+                                        #{event.code}
+                                      </Badge>
+                                    </div>
                                   </div>
-                                  <Badge
-                                    className={cn(
-                                      "mt-2 text-xs font-medium px-2 py-0.5",
-                                      active
-                                        ? "bg-amber-50 dark:bg-amber-400/10 text-amber-600 dark:text-amber-400 border-amber-200 dark:border-amber-400/20"
-                                        : "bg-muted text-muted-foreground border-border"
-                                    )}
-                                    variant="outline"
-                                  >
-                                    {active ? "● Activo" : "Pasado"}
-                                  </Badge>
-                                </div>
                                   <div className="flex items-center gap-1">
                                     <a
                                       href={getGoogleCalendarUrl(event)}
@@ -324,44 +408,54 @@ export function EventDashboard({ events, loading, onCreateEvent, onDeleteEvent, 
                                       </button>
                                     )}
                                   </div>
-                              </div>
-
-                              <div className="space-y-1.5 mb-4">
-                                <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                                  <CalendarDays className="h-3.5 w-3.5 shrink-0" />
-                                  {format(new Date(event.date), "d 'de' MMMM, yyyy", { locale: es })}
                                 </div>
-                                <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                                  <MapPin className="h-3.5 w-3.5 shrink-0" />
-                                  <span className="truncate">{event.location}</span>
-                                </div>
-                              </div>
 
-                              {/* Stats */}
-                              <div className="flex items-center justify-between pt-3 border-t border-border">
-                                <div className="flex items-center gap-3 text-xs text-muted-foreground">
-                                  <span className="flex items-center gap-1">
-                                    <Users className="h-3 w-3" />
-                                    {event.guests.length} inv.
-                                  </span>
-                                  <span className="text-green-600 dark:text-green-400 font-medium">{arrived} ingresaron</span>
-                                </div>
-                                <ChevronRight className="h-4 w-4 text-muted-foreground/40 group-hover:text-amber-500 transition-colors" />
-                              </div>
-
-                              {/* Progress */}
-                              {event.guests.length > 0 && (
-                                <div className="mt-3">
-                                  <div className="h-1.5 w-full bg-muted rounded-full overflow-hidden">
-                                    <div
-                                      className="h-full bg-gradient-to-r from-green-500 to-green-400 rounded-full transition-all duration-500"
-                                      style={{ width: `${progress}%` }}
-                                    />
+                                <div className="space-y-1.5 mb-4">
+                                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                                    <CalendarDays className="h-3.5 w-3.5 shrink-0" />
+                                    {format(new Date(event.date), "d 'de' MMMM, yyyy", { locale: es })}
                                   </div>
-                                  <p className="text-xs text-muted-foreground/60 mt-1">{progress}% check-in</p>
+                                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                                    <MapPin className="h-3.5 w-3.5 shrink-0" />
+                                    <span className="truncate">{event.location}</span>
+                                  </div>
                                 </div>
-                              )}
-                            </div>
+
+                                <div className="flex items-center justify-between pt-5 border-t border-border mt-2">
+                                  <div className="flex items-center gap-4">
+                                    <div className="flex flex-col">
+                                      <span className="text-[10px] uppercase font-black text-slate-400 truncate">Invitados</span>
+                                      <span className="text-sm font-black text-foreground">{event.guests.length}</span>
+                                    </div>
+                                    <div className="h-8 w-px bg-slate-100 dark:bg-slate-800" />
+                                    <div className="flex flex-col">
+                                      <span className="text-[10px] uppercase font-black text-green-600/60 dark:text-green-400/60 truncate">Check-in</span>
+                                      <span className="text-sm font-black text-green-600 dark:text-green-400">{arrived}</span>
+                                    </div>
+                                  </div>
+                                  <div className="w-9 h-9 rounded-2xl bg-slate-50 dark:bg-slate-800 flex items-center justify-center group-hover:bg-amber-400 transition-all shadow-inner">
+                                    <ChevronRight className="h-4 w-4 text-slate-400 group-hover:text-black transition-colors" />
+                                  </div>
+                                </div>
+
+                                {/* Progress Bar */}
+                                {event.guests.length > 0 && (
+                                  <div className="mt-5">
+                                    <div className="flex items-center justify-between mb-1.5 px-0.5">
+                                       <span className="text-[9px] font-black uppercase text-slate-400 tracking-wider">Logística de ingreso</span>
+                                       <span className="text-[9px] font-black text-green-600">{progress}%</span>
+                                    </div>
+                                    <div className="h-2 w-full bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden shadow-inner">
+                                      <div
+                                        className="h-full bg-gradient-to-r from-green-600 to-emerald-400 rounded-full transition-all duration-700 ease-out relative"
+                                        style={{ width: `${progress}%` }}
+                                      >
+                                        <div className="absolute inset-0 bg-white/20 animate-pulse" />
+                                      </div>
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
                           </div>
                         );
                       })}
@@ -372,12 +466,24 @@ export function EventDashboard({ events, loading, onCreateEvent, onDeleteEvent, 
           </div>
 
           {/* Sidebar with Calendar */}
-          <div className="w-full lg:w-80 space-y-6">
-            <div className="p-4 rounded-2xl border border-border bg-card shadow-sm sticky top-24">
-              <h3 className="text-sm font-bold text-foreground mb-4 flex items-center gap-2">
-                <CalendarDays className="h-4 w-4 text-amber-500" />
-                Vista Rápida
-              </h3>
+          <div className="w-full lg:w-96 space-y-6">
+            <div className="p-6 rounded-3xl border border-border bg-white/70 dark:bg-slate-950/40 backdrop-blur-md shadow-xl sticky top-24">
+              <div className="flex items-center justify-between mb-6">
+                <h3 className="text-xs font-black text-foreground uppercase tracking-widest flex items-center gap-2">
+                  <CalendarDays className="h-4 w-4 text-amber-500" />
+                  Agenda Mensual
+                </h3>
+                {selectedDashboardDate && (
+                  <Button 
+                    variant="ghost" 
+                    size="sm" 
+                    onClick={() => setSelectedDashboardDate(undefined)}
+                    className="h-6 text-[10px] font-bold text-amber-600 hover:text-amber-700 hover:bg-amber-50 dark:hover:bg-amber-500/10 px-2 rounded-full border border-amber-200 dark:border-amber-700transition-all"
+                  >
+                    Ver Todo
+                  </Button>
+                )}
+              </div>
               <Calendar 
                 mode="single"
                 selected={selectedDashboardDate}
@@ -510,80 +616,347 @@ export function EventDashboard({ events, loading, onCreateEvent, onDeleteEvent, 
 
       {/* User Management Dialog */}
       <Dialog open={showUserMgmt} onOpenChange={setShowUserMgmt}>
-        <DialogContent className="sm:max-w-md bg-card border-border">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-               <ShieldCheck className="h-5 w-5 text-amber-500" />
-               Gestión de Accesos
+        <DialogContent className="sm:max-w-2xl bg-card border-border max-h-[90vh] overflow-hidden flex flex-col p-0">
+          <DialogHeader className="p-6 pb-2">
+            <DialogTitle className="flex items-center gap-2 text-xl font-black">
+               <ShieldCheck className="h-6 w-6 text-amber-500" />
+               Panel de Accesos
             </DialogTitle>
           </DialogHeader>
           
-          <div className="space-y-6 pt-4">
-            <div className="space-y-4">
-              <h4 className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Agregar Miembro</h4>
-              <div className="flex flex-col gap-3">
-                <div className="space-y-1.5">
-                  <Label htmlFor="user-email">Correo Electrónico</Label>
-                  <Input 
-                    id="user-email"
-                    type="email"
-                    placeholder="correo@ejemplo.com"
-                    value={newEmail}
-                    onChange={(e) => setNewEmail(e.target.value)}
-                    className="bg-background border-border"
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label>Rol del Usuario</Label>
-                  <div className="flex gap-2">
-                    <Button 
-                      type="button"
-                      variant={newRole === "staff" ? "default" : "outline"}
-                      onClick={() => setNewRole("staff")}
-                      className={cn("flex-1 h-9", newRole === "staff" && "bg-amber-400 text-black hover:bg-amber-300")}
-                    >
-                      Staff
-                    </Button>
-                    <Button 
-                      type="button"
-                      variant={newRole === "admin" ? "default" : "outline"}
-                      onClick={() => setNewRole("admin")}
-                      className={cn("flex-1 h-9", newRole === "admin" && "bg-black text-white hover:bg-zinc-800")}
-                    >
-                      Admin
-                    </Button>
-                  </div>
-                </div>
-                <Button 
-                  className="w-full bg-amber-400 hover:bg-amber-300 text-black font-bold h-10 mt-2"
-                  onClick={async () => {
-                    if (!newEmail.trim()) return;
-                    try {
-                      // Normalizing the email as an ID for authorization
-                      const authRef = doc(db, "authorized_emails", newEmail.toLowerCase().trim());
-                      await setDoc(authRef, {
-                        role: newRole,
-                        invitedBy: user?.email,
-                        createdAt: new Date().toISOString()
-                      });
-                      alert(`¡Éxito! ${newEmail} ahora tiene acceso como ${newRole}.`);
-                      setNewEmail("");
-                    } catch (e) {
-                      console.error(e);
-                      alert("Error al autorizar usuario. Verifica los permisos.");
-                    }
-                  }}
-                >
-                  <UserPlus className="h-4 w-4 mr-2" /> Autorizar Acceso
-                </Button>
-              </div>
+          <Tabs defaultValue="list" className="flex-1 flex flex-col overflow-hidden">
+            <div className="px-6">
+              <TabsList className="grid w-full grid-cols-2 bg-muted/50 p-1 rounded-xl">
+                <TabsTrigger value="list" className="rounded-lg font-bold text-xs uppercase tracking-tight">Ver Miembros</TabsTrigger>
+                <TabsTrigger value="add" className="rounded-lg font-bold text-xs uppercase tracking-tight">Agregar Nuevo</TabsTrigger>
+              </TabsList>
             </div>
 
-            <div className="pt-4 border-t border-border">
-              <p className="text-[10px] text-muted-foreground leading-relaxed italic">
-                 * Los usuarios administradores pueden ver todos los eventos y editarlos. El Staff solo puede ver y realizar check-in de invitados.
-              </p>
-            </div>
+            <TabsContent value="list" className="flex-1 overflow-hidden mt-4">
+              <ScrollArea className="h-full px-6">
+                <div className="space-y-4 pb-8">
+                  {isLoadingUsers ? (
+                    <div className="flex flex-col items-center justify-center py-20 gap-3">
+                      <Loader2 className="h-8 w-8 animate-spin text-amber-500" />
+                      <p className="text-xs font-bold text-muted-foreground uppercase">Cargando usuarios...</p>
+                    </div>
+                  ) : authorizedUsers.length === 0 ? (
+                    <div className="text-center py-20 opacity-40">
+                      <p className="text-sm font-bold uppercase">No hay usuarios registrados</p>
+                    </div>
+                  ) : (
+                    authorizedUsers.map((u) => {
+                      const isEditing = editingUserId === u.id;
+                      const userPerms = u.permissions || (u.role === "admin" ? DEFAULT_ADMIN_PERMISSIONS : DEFAULT_STAFF_PERMISSIONS);
+                      
+                      return (
+                        <div 
+                          key={u.id} 
+                          className={cn(
+                            "rounded-2xl border transition-all duration-300 overflow-hidden",
+                            isEditing ? "border-amber-400 bg-amber-400/5 shadow-lg" : "border-border bg-card/50 hover:border-slate-300 dark:hover:border-slate-700"
+                          )}
+                        >
+                          <div className="p-4 flex items-center justify-between gap-4">
+                            <div className="flex items-center gap-3 min-w-0">
+                              <div className={cn(
+                                "w-10 h-10 rounded-xl flex items-center justify-center font-black text-sm",
+                                u.role === "admin" ? "bg-black text-white" : "bg-amber-100 text-amber-700"
+                              )}>
+                                {u.id.charAt(0).toUpperCase()}
+                              </div>
+                              <div className="min-w-0">
+                                <p className="text-sm font-bold truncate">{u.id}</p>
+                                <Badge variant="outline" className={cn(
+                                  "text-[9px] uppercase font-black px-1.5 h-4 border-none",
+                                  u.role === "admin" ? "bg-black/10 text-black dark:bg-white/10 dark:text-white" : "bg-amber-100 text-amber-700"
+                                )}>
+                                  {u.role === "admin" ? "Administrador" : "Staff"}
+                                </Badge>
+                              </div>
+                            </div>
+                            
+                            <div className="flex items-center gap-2">
+                              {u.id !== "pepe.jlfc.16@gmail.com" && (
+                                <>
+                                  <Button 
+                                    variant="ghost" 
+                                    size="icon" 
+                                    className={cn("h-9 w-9 rounded-xl", isEditing && "text-amber-600 bg-amber-100")}
+                                    onClick={() => setEditingUserId(isEditing ? null : u.id)}
+                                  >
+                                    <Settings className="h-4 w-4" />
+                                  </Button>
+                                  <Button 
+                                    variant="ghost" 
+                                    size="icon" 
+                                    className="h-9 w-9 rounded-xl text-red-400 hover:text-red-500 hover:bg-red-50"
+                                    onClick={() => handleDeleteUser(u.id)}
+                                  >
+                                    <Trash2 className="h-4 w-4" />
+                                  </Button>
+                                </>
+                              )}
+                            </div>
+                          </div>
+
+                          {isEditing && (
+                            <div className="px-4 pb-5 pt-2 border-t border-amber-400/20 space-y-5 animate-in slide-in-from-top-2 duration-300">
+                              <div className="space-y-3">
+                                <Label className="text-[10px] font-black uppercase text-amber-700 tracking-widest">Rol del Usuario</Label>
+                                <div className="flex gap-2">
+                                  <Button 
+                                    size="sm"
+                                    variant={u.role === "staff" ? "default" : "outline"}
+                                    onClick={() => handleUpdateUser(u.id, { 
+                                      role: "staff", 
+                                      permissions: DEFAULT_STAFF_PERMISSIONS 
+                                    })}
+                                    className={cn("flex-1 h-8 text-[10px] font-bold uppercase", u.role === "staff" && "bg-amber-400 text-black hover:bg-amber-300")}
+                                  >
+                                    Asignar Staff
+                                  </Button>
+                                  <Button 
+                                    size="sm"
+                                    variant={u.role === "admin" ? "default" : "outline"}
+                                    onClick={() => handleUpdateUser(u.id, { 
+                                      role: "admin", 
+                                      permissions: DEFAULT_ADMIN_PERMISSIONS 
+                                    })}
+                                    className={cn("flex-1 h-8 text-[10px] font-bold uppercase", u.role === "admin" && "bg-black text-white hover:bg-zinc-800")}
+                                  >
+                                    Asignar Admin
+                                  </Button>
+                                </div>
+                              </div>
+
+                              <div className="space-y-4">
+                                <Label className="text-[10px] font-black uppercase text-amber-700 tracking-widest">Permisos Individuales</Label>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                  <div className="flex items-center justify-between p-3 rounded-xl bg-background/50 border border-border/50">
+                                    <div className="flex items-center gap-2">
+                                      <div className="w-8 h-8 rounded-lg bg-blue-500/10 flex items-center justify-center text-blue-500">
+                                        <DollarSign className="h-4 w-4" />
+                                      </div>
+                                      <div className="space-y-0.5">
+                                        <p className="text-[11px] font-bold">Contabilidad</p>
+                                        <p className="text-[9px] text-muted-foreground leading-none">Ver finanzas</p>
+                                      </div>
+                                    </div>
+                                    <Switch 
+                                      disabled={u.role === "admin"}
+                                      checked={userPerms.canViewAccounting}
+                                      onCheckedChange={(checked) => handleUpdateUser(u.id, {
+                                        permissions: { ...userPerms, canViewAccounting: checked }
+                                      })}
+                                    />
+                                  </div>
+
+                                  <div className="flex items-center justify-between p-3 rounded-xl bg-background/50 border border-border/50">
+                                    <div className="flex items-center gap-2">
+                                      <div className="w-8 h-8 rounded-lg bg-emerald-500/10 flex items-center justify-center text-emerald-500">
+                                        <Layout className="h-4 w-4" />
+                                      </div>
+                                      <div className="space-y-0.5">
+                                        <p className="text-[11px] font-bold">Mesas</p>
+                                        <p className="text-[9px] text-muted-foreground leading-none">Editar croquis</p>
+                                      </div>
+                                    </div>
+                                    <Switch 
+                                      disabled={u.role === "admin"}
+                                      checked={userPerms.canEditCroquis}
+                                      onCheckedChange={(checked) => handleUpdateUser(u.id, {
+                                        permissions: { ...userPerms, canEditCroquis: checked }
+                                      })}
+                                    />
+                                  </div>
+
+                                  <div className="flex items-center justify-between p-3 rounded-xl bg-background/50 border border-border/50">
+                                    <div className="flex items-center gap-2">
+                                      <div className="w-8 h-8 rounded-lg bg-amber-500/10 flex items-center justify-center text-amber-500">
+                                        <Users className="h-4 w-4" />
+                                      </div>
+                                      <div className="space-y-0.5">
+                                        <p className="text-[11px] font-bold">Invitados</p>
+                                        <p className="text-[9px] text-muted-foreground leading-none">Eliminar/Editar</p>
+                                      </div>
+                                    </div>
+                                    <Switch 
+                                      disabled={u.role === "admin"}
+                                      checked={userPerms.canManageGuests}
+                                      onCheckedChange={(checked) => handleUpdateUser(u.id, {
+                                        permissions: { ...userPerms, canManageGuests: checked }
+                                      })}
+                                    />
+                                  </div>
+
+                                  <div className="flex items-center justify-between p-3 rounded-xl bg-background/50 border border-border/50">
+                                    <div className="flex items-center gap-2">
+                                      <div className="w-8 h-8 rounded-lg bg-purple-500/10 flex items-center justify-center text-purple-500">
+                                        <BarChart3 className="h-4 w-4" />
+                                      </div>
+                                      <div className="space-y-0.5">
+                                        <p className="text-[11px] font-bold">Cronograma</p>
+                                        <p className="text-[9px] text-muted-foreground leading-none">Editar tiempos</p>
+                                      </div>
+                                    </div>
+                                    <Switch 
+                                      disabled={u.role === "admin"}
+                                      checked={userPerms.canEditTimeline}
+                                      onCheckedChange={(checked) => handleUpdateUser(u.id, {
+                                        permissions: { ...userPerms, canEditTimeline: checked }
+                                      })}
+                                    />
+                                  </div>
+                                </div>
+                                {u.role === "admin" && (
+                                  <p className="text-[9px] text-muted-foreground italic text-center">
+                                    * Los administradores tienen todos los permisos habilitados por defecto.
+                                  </p>
+                                )}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              </ScrollArea>
+            </TabsContent>
+
+            <TabsContent value="add" className="p-6 pt-2">
+              <div className="space-y-4">
+                <div className="bg-amber-500/5 border border-amber-500/20 p-4 rounded-2xl flex gap-3">
+                  <AlertCircle className="h-5 w-5 text-amber-500 shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-xs font-bold text-amber-500 uppercase tracking-tight">Nueva Cuenta Personalizada</p>
+                    <p className="text-[11px] text-muted-foreground leading-tight mt-1">Crea una cuenta para tu equipo y asígnale permisos específicos inmediatamente.</p>
+                  </div>
+                </div>
+
+                <div className="space-y-4 pt-2">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="user-email" className="text-[11px] font-black uppercase text-muted-foreground">Correo de Acceso</Label>
+                    <div className="relative">
+                      <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                      <Input 
+                        id="user-email"
+                        type="email"
+                        placeholder="ejemplo@one.com"
+                        value={newEmail}
+                        onChange={(e) => setNewEmail(e.target.value)}
+                        className="bg-background border-border h-11 pl-10 rounded-xl"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <Label htmlFor="user-pass" className="text-[11px] font-black uppercase text-muted-foreground">Contraseña</Label>
+                    <div className="relative">
+                      <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                      <Input 
+                        id="user-pass"
+                        type={showPassword ? "text" : "password"}
+                        placeholder="••••••••"
+                        value={newPassword}
+                        onChange={(e) => setNewPassword(e.target.value)}
+                        className="bg-background border-border h-11 pl-10 pr-10 rounded-xl"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowPassword(!showPassword)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                      >
+                        {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <Label className="text-[11px] font-black uppercase text-muted-foreground">Nivel de Acceso</Label>
+                    <div className="flex gap-2">
+                      <Button 
+                        type="button"
+                        variant={newRole === "staff" ? "default" : "outline"}
+                        onClick={() => setNewRole("staff")}
+                        className={cn("flex-1 h-11 rounded-xl transition-all", newRole === "staff" && "bg-amber-400 text-black hover:bg-amber-300 shadow-md scale-[1.02]")}
+                      >
+                        Rol Staff
+                      </Button>
+                      <Button 
+                        type="button"
+                        variant={newRole === "admin" ? "default" : "outline"}
+                        onClick={() => setNewRole("admin")}
+                        className={cn("flex-1 h-11 rounded-xl transition-all", newRole === "admin" && "bg-black text-white hover:bg-zinc-800 shadow-md scale-[1.02]")}
+                      >
+                        Rol Admin
+                      </Button>
+                    </div>
+                  </div>
+
+                  <Button 
+                    className="w-full bg-amber-400 hover:bg-amber-300 text-black font-black h-12 mt-4 rounded-2xl shadow-lg transition-transform active:scale-95"
+                    disabled={isRegistering}
+                    onClick={async () => {
+                      const email = newEmail.toLowerCase().trim();
+                      const password = newPassword;
+                      
+                      if (!email || !password) {
+                        alert("Por favor completa todos los campos.");
+                        return;
+                      }
+                      if (password.length < 6) {
+                        alert("La contraseña debe tener al menos 6 caracteres.");
+                        return;
+                      }
+
+                      setIsRegistering(true);
+                      let tempApp;
+                      try {
+                        tempApp = initializeApp(firebaseConfig, "temp-registration");
+                        const tempAuth = getAuth(tempApp);
+                        await createUserWithEmailAndPassword(tempAuth, email, password);
+                        
+                        const authRef = doc(db, "authorized_emails", email);
+                        await setDoc(authRef, {
+                          role: newRole,
+                          permissions: newRole === "admin" ? DEFAULT_ADMIN_PERMISSIONS : DEFAULT_STAFF_PERMISSIONS,
+                          invitedBy: user?.email,
+                          createdAt: new Date().toISOString()
+                        });
+
+                        alert(`¡Éxito! Cuenta creada para ${email}.`);
+                        setNewEmail("");
+                        setNewPassword("");
+                        fetchUsers();
+                      } catch (e: any) {
+                        console.error(e);
+                        let message = "Error al crear el usuario.";
+                        if (e.code === "auth/email-already-in-use") message = "Este correo ya está registrado.";
+                        alert(message);
+                      } finally {
+                        if (tempApp) await deleteApp(tempApp);
+                        setIsRegistering(false);
+                      }
+                    }}
+                  >
+                    {isRegistering ? (
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    ) : (
+                      <UserPlus className="h-4 w-4 mr-2" />
+                    )}
+                    {isRegistering ? "Creando cuenta..." : "Generar Acceso de Equipo"}
+                  </Button>
+                </div>
+              </div>
+            </TabsContent>
+          </Tabs>
+
+          <div className="p-4 bg-muted/30 border-t border-border mt-auto">
+            <p className="text-[10px] text-muted-foreground text-center italic">
+              Los cambios en permisos se aplican automáticamente el próximo login del usuario.
+            </p>
           </div>
         </DialogContent>
       </Dialog>

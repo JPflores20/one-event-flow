@@ -26,6 +26,10 @@ const Index = () => {
         onDeleteElement={(elementId) => store.deleteElement(selectedEvent.id, elementId)}
         onUpdateElementProps={(elementId, updates) => store.updateElementProps(selectedEvent.id, elementId, updates)}
         onUpdateTimeline={(eventId, timeline) => store.updateTimeline(eventId, timeline)}
+        onAddTransaction={(t) => store.addTransaction(selectedEvent.id, t)}
+        onUpdateTransaction={(id, u) => store.updateTransaction(selectedEvent.id, id, u)}
+        onDeleteTransaction={(id) => store.deleteTransaction(selectedEvent.id, id)}
+        onAddCategory={(c) => store.addCustomCategory(selectedEvent.id, c)}
       />
     );
   }

@@ -7,19 +7,23 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import type { EventData, TimelineItem } from "@/hooks/useEventStore";
 import { cn } from "@/lib/utils";
 
+import { useAuth } from "@/hooks/useAuth";
+
 interface EventTimelineProps {
   event: EventData;
   onUpdateTimeline: (eventId: string, timeline: TimelineItem[]) => void;
 }
 
 export function EventTimeline({ event, onUpdateTimeline }: EventTimelineProps) {
+  const { role, permissions } = useAuth();
+  const canEdit = role === "admin" || permissions?.canEditTimeline;
   const [showAdd, setShowAdd] = useState(false);
   const [time, setTime] = useState("");
   const [activity, setActivity] = useState("");
 
   const handleAddItem = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!time || !activity) return;
+    if (!canEdit || !time || !activity) return;
     
     const newItem: TimelineItem = {
       id: crypto.randomUUID(),
@@ -36,11 +40,13 @@ export function EventTimeline({ event, onUpdateTimeline }: EventTimelineProps) {
   };
 
   const handleDeleteItem = (id: string) => {
+    if (!canEdit) return;
     const newTimeline = event.timeline.filter(item => item.id !== id);
     onUpdateTimeline(event.id, newTimeline);
   };
 
   const toggleComplete = (id: string) => {
+    if (!canEdit) return;
     const newTimeline = event.timeline.map(item => 
       item.id === id ? { ...item, completed: !item.completed } : item
     );
@@ -54,12 +60,14 @@ export function EventTimeline({ event, onUpdateTimeline }: EventTimelineProps) {
           <h2 className="text-xl font-bold text-foreground">Cronograma del Evento</h2>
           <p className="text-sm text-muted-foreground">Define los momentos clave de la logística.</p>
         </div>
-        <Button 
-          onClick={() => setShowAdd(true)}
-          className="bg-amber-400 hover:bg-amber-300 text-black font-semibold gap-2"
-        >
-          <Plus className="h-4 w-4" /> Agregar Actividad
-        </Button>
+        {canEdit && (
+          <Button 
+            onClick={() => setShowAdd(true)}
+            className="bg-amber-400 hover:bg-amber-300 text-black font-semibold gap-2"
+          >
+            <Plus className="h-4 w-4" /> Agregar Actividad
+          </Button>
+        )}
       </div>
 
       <div className="relative">
@@ -81,6 +89,7 @@ export function EventTimeline({ event, onUpdateTimeline }: EventTimelineProps) {
                 <div className="hidden sm:flex items-center justify-center p-1 bg-background z-10">
                   <button 
                     onClick={() => toggleComplete(item.id)}
+                    disabled={!canEdit}
                     className={cn(
                       "rounded-full transition-all duration-300",
                       item.completed 
@@ -103,12 +112,14 @@ export function EventTimeline({ event, onUpdateTimeline }: EventTimelineProps) {
                       <Clock className="h-4 w-4 text-amber-500" />
                       <span className="text-lg font-bold text-foreground">{item.time}</span>
                     </div>
-                    <button 
-                      onClick={() => handleDeleteItem(item.id)}
-                      className="text-muted-foreground/40 hover:text-red-500 p-1 opacity-0 group-hover:opacity-100 transition-opacity"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </button>
+                    {canEdit && (
+                      <button 
+                        onClick={() => handleDeleteItem(item.id)}
+                        className="text-muted-foreground/40 hover:text-red-500 p-1 opacity-0 group-hover:opacity-100 transition-opacity"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    )}
                   </div>
                   <h4 className={cn(
                     "font-semibold text-base",

@@ -4,7 +4,7 @@
 
 @layer base {
   :root {
-    --background: 0 0% 100%;
+    --background: 210 20% 98%;
     --foreground: 0 0% 9%;
 
     --card: 0 0% 100%;
@@ -95,5 +95,22 @@
 
   body {
     @apply bg-background text-foreground;
+  }
+}
+
+@media print {
+  .print\:hidden {
+    display: none !important;
+  }
+  .print\:block {
+    display: block !important;
+  }
+  body {
+    background: white !important;
+    color: black !important;
+  }
+  /* Hide common layout elements if they don't have print:hidden */
+  header, nav, aside, button, footer {
+    display: none !important;
   }
 }

@@ -48,7 +48,9 @@ export function SeatingPlan({
   onAddElement, onDeleteElement, onUpdateElementProps,
   highlightedTableId
 }: SeatingPlanProps) {
-  const { role } = useAuth();
+  const { role, permissions } = useAuth();
+  const canEdit = role === "admin" || permissions?.canEditCroquis;
+  const canManageGuests = role === "admin" || permissions?.canManageGuests;
   const [showTableForm, setShowTableForm] = useState(false);
   const [showElementForm, setShowElementForm] = useState(false);
   const [view, setView] = useState<"list" | "croquis">("list");
@@ -291,8 +293,8 @@ export function SeatingPlan({
           </Button>
         </div>
 
-        {/* Dock Inferior en Fullscreen */}
-        {isFullscreen && (
+        {/* Dock Inferior en Fullscreen (Solo Admin o con Permisos) */}
+        {isFullscreen && canEdit && (
           <div className="absolute bottom-10 left-1/2 -translate-x-1/2 z-50 flex gap-3 p-3 bg-background/90 backdrop-blur-md border border-border rounded-2xl shadow-2xl animate-in fade-in slide-in-from-bottom-8 duration-500">
             <Button 
               onClick={() => setShowElementForm(true)} 
@@ -348,6 +350,8 @@ export function SeatingPlan({
                   lockAspectRatio={forceAspect}
                   bounds="parent"
                   dragHandleClassName="drag-handle"
+                  disableDragging={role === "staff"}
+                  enableResizing={role === "admin"}
                   onDragStop={(e, d) => handleDragStop(table.id, d)}
                   onResizeStop={(e, direction, ref, delta, position) => handleResizeStop(table.id, ref, position)}
                   className={cn(
@@ -375,46 +379,48 @@ export function SeatingPlan({
                           isCircle && "px-6"
                         )}>
                           <div className="drag-handle absolute top-0 left-0 right-0 p-2 flex items-center justify-between cursor-grab active:cursor-grabbing opacity-80 hover:opacity-100">
-                             <GripVertical className="h-4 w-4 text-muted-foreground/40 shrink-0" />
-                             <DropdownMenu>
-                              <DropdownMenuTrigger asChild>
-                                <Button variant="ghost" size="icon" className="h-6 w-6 rounded-full text-muted-foreground hover:bg-muted shrink-0 z-50 relative pointer-events-auto">
-                                  <Settings2 className="h-3.5 w-3.5" />
-                                </Button>
-                              </DropdownMenuTrigger>
-                              <DropdownMenuContent align="end" className="w-56 z-[100]">
-                                <DropdownMenuLabel className="text-xs">Forma</DropdownMenuLabel>
-                                <DropdownMenuItem onClick={() => handleChangeShape(table.id, "rect")}>
-                                  <RectangleHorizontal className="mr-2 h-4 w-4" /> Rectangular
-                                </DropdownMenuItem>
-                                <DropdownMenuItem onClick={() => handleChangeShape(table.id, "square")}>
-                                  <Square className="mr-2 h-4 w-4" /> Cuadrada
-                                </DropdownMenuItem>
-                                <DropdownMenuItem onClick={() => handleChangeShape(table.id, "circle")}>
-                                  <Circle className="mr-2 h-4 w-4" /> Circular
-                                </DropdownMenuItem>
-                                <DropdownMenuSeparator />
-                                <DropdownMenuLabel className="text-[10px] uppercase tracking-wider text-muted-foreground">Color</DropdownMenuLabel>
-                                <div className="grid grid-cols-5 gap-1.5 p-2">
-                                  {COLOR_PALETTE.map((c) => (
-                                    <button
-                                      key={c.class}
-                                      onClick={() => handleChangeColor(table.id, c.class)}
-                                      className={cn(
-                                        "h-6 w-6 rounded-full border border-black/10 transition-transform hover:scale-110",
-                                        table.color === c.class && "ring-2 ring-offset-1 ring-primary shadow-sm"
-                                      )}
-                                      style={{ backgroundColor: c.hex }}
-                                      title={c.name}
-                                    />
-                                  ))}
-                                </div>
-                                <DropdownMenuSeparator />
-                                <DropdownMenuItem onClick={() => onDeleteTable(table.id)} className="text-red-500 focus:bg-red-50 focus:text-red-600 dark:focus:bg-red-950/50">
-                                  <Trash2 className="mr-2 h-4 w-4" /> Eliminar Mesa
-                                </DropdownMenuItem>
-                              </DropdownMenuContent>
-                            </DropdownMenu>
+                             <GripVertical className={cn("h-4 w-4 text-muted-foreground/40 shrink-0", !canEdit && "hidden")} />
+                             {canEdit && (
+                               <DropdownMenu>
+                                <DropdownMenuTrigger asChild>
+                                  <Button variant="ghost" size="icon" className="h-6 w-6 rounded-full text-muted-foreground hover:bg-muted shrink-0 z-50 relative pointer-events-auto">
+                                    <Settings2 className="h-3.5 w-3.5" />
+                                  </Button>
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent align="end" className="w-56 z-[100]">
+                                  <DropdownMenuLabel className="text-xs">Forma</DropdownMenuLabel>
+                                  <DropdownMenuItem onClick={() => handleChangeShape(table.id, "rect")}>
+                                    <RectangleHorizontal className="mr-2 h-4 w-4" /> Rectangular
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem onClick={() => handleChangeShape(table.id, "square")}>
+                                    <Square className="mr-2 h-4 w-4" /> Cuadrada
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem onClick={() => handleChangeShape(table.id, "circle")}>
+                                    <Circle className="mr-2 h-4 w-4" /> Circular
+                                  </DropdownMenuItem>
+                                  <DropdownMenuSeparator />
+                                  <DropdownMenuLabel className="text-[10px] uppercase tracking-wider text-muted-foreground">Color</DropdownMenuLabel>
+                                  <div className="grid grid-cols-5 gap-1.5 p-2">
+                                    {COLOR_PALETTE.map((c) => (
+                                      <button
+                                        key={c.class}
+                                        onClick={() => handleChangeColor(table.id, c.class)}
+                                        className={cn(
+                                          "h-6 w-6 rounded-full border border-black/10 transition-transform hover:scale-110",
+                                          table.color === c.class && "ring-2 ring-offset-1 ring-primary shadow-sm"
+                                        )}
+                                        style={{ backgroundColor: c.hex }}
+                                        title={c.name}
+                                      />
+                                    ))}
+                                  </div>
+                                  <DropdownMenuSeparator />
+                                  <DropdownMenuItem onClick={() => onDeleteTable(table.id)} className="text-red-500 focus:bg-red-50 focus:text-red-600 dark:focus:bg-red-950/50">
+                                    <Trash2 className="mr-2 h-4 w-4" /> Eliminar Mesa
+                                  </DropdownMenuItem>
+                                </DropdownMenuContent>
+                               </DropdownMenu>
+                             )}
                           </div>
                           <div className="text-center mt-2 pointer-events-none select-none">
                              <h5 
@@ -495,6 +501,8 @@ export function SeatingPlan({
                   lockAspectRatio={forceAspect}
                   bounds="parent"
                   dragHandleClassName="drag-handle"
+                  disableDragging={role === "staff"}
+                  enableResizing={role === "admin"}
                   onDragStop={(e, d) => handleElementDragStop(element.id, d)}
                   onResizeStop={(e, direction, ref, delta, position) => handleElementResizeStop(element.id, ref, position)}
                   className={cn(
@@ -506,46 +514,48 @@ export function SeatingPlan({
                     color: element.color ? elementColor.hex : undefined
                   }}
                 >
-                  <div className="absolute inset-0 drag-handle cursor-grab active:cursor-grabbing" />
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button variant="ghost" size="icon" className="absolute top-2 right-2 h-6 w-6 rounded-full opacity-0 group-hover:opacity-100 bg-background shadow-sm z-50 pointer-events-auto">
-                        <Settings2 className="h-3.5 w-3.5" />
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end" className="w-56 z-[100]">
-                      <DropdownMenuLabel className="text-xs">Forma</DropdownMenuLabel>
-                      <DropdownMenuItem onClick={() => handleElementChangeShape(element.id, "rect")}>
-                        <RectangleHorizontal className="mr-2 h-4 w-4" /> Rectángulo
-                      </DropdownMenuItem>
-                      <DropdownMenuItem onClick={() => handleElementChangeShape(element.id, "square")}>
-                        <Square className="mr-2 h-4 w-4" /> Cuadrado
-                      </DropdownMenuItem>
-                      <DropdownMenuItem onClick={() => handleElementChangeShape(element.id, "circle")}>
-                        <Circle className="mr-2 h-4 w-4" /> Círculo
-                      </DropdownMenuItem>
-                      <DropdownMenuSeparator />
-                      <DropdownMenuLabel className="text-[10px] uppercase tracking-wider text-muted-foreground">Color</DropdownMenuLabel>
-                      <div className="grid grid-cols-5 gap-1.5 p-2">
-                        {COLOR_PALETTE.map((c) => (
-                          <button
-                            key={c.class}
-                            onClick={() => handleElementChangeColor(element.id, c.class)}
-                            className={cn(
-                              "h-6 w-6 rounded-full border border-black/10 transition-transform hover:scale-110",
-                              element.color === c.class && "ring-2 ring-offset-1 ring-primary shadow-sm"
-                            )}
-                            style={{ backgroundColor: c.hex }}
-                            title={c.name}
-                          />
-                        ))}
-                      </div>
-                      <DropdownMenuSeparator />
-                      <DropdownMenuItem onClick={() => onDeleteElement(element.id)} className="text-red-500">
-                        <Trash2 className="mr-2 h-4 w-4" /> Eliminar Elemento
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
+                  <div className={cn("absolute inset-0 drag-handle", canEdit ? "cursor-grab active:cursor-grabbing" : "cursor-default")} />
+                  {canEdit && (
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button variant="ghost" size="icon" className="absolute top-2 right-2 h-6 w-6 rounded-full opacity-0 group-hover:opacity-100 bg-background shadow-sm z-50 pointer-events-auto">
+                          <Settings2 className="h-3.5 w-3.5" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end" className="w-56 z-[100]">
+                        <DropdownMenuLabel className="text-xs">Forma</DropdownMenuLabel>
+                        <DropdownMenuItem onClick={() => handleElementChangeShape(element.id, "rect")}>
+                          <RectangleHorizontal className="mr-2 h-4 w-4" /> Rectángulo
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => handleElementChangeShape(element.id, "square")}>
+                          <Square className="mr-2 h-4 w-4" /> Cuadrado
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => handleElementChangeShape(element.id, "circle")}>
+                          <Circle className="mr-2 h-4 w-4" /> Círculo
+                        </DropdownMenuItem>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuLabel className="text-[10px] uppercase tracking-wider text-muted-foreground">Color</DropdownMenuLabel>
+                        <div className="grid grid-cols-5 gap-1.5 p-2">
+                          {COLOR_PALETTE.map((c) => (
+                            <button
+                              key={c.class}
+                              onClick={() => handleElementChangeColor(element.id, c.class)}
+                              className={cn(
+                                "h-6 w-6 rounded-full border border-black/10 transition-transform hover:scale-110",
+                                element.color === c.class && "ring-2 ring-offset-1 ring-primary shadow-sm"
+                              )}
+                              style={{ backgroundColor: c.hex }}
+                              title={c.name}
+                            />
+                          ))}
+                        </div>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem onClick={() => onDeleteElement(element.id)} className="text-red-500">
+                          <Trash2 className="mr-2 h-4 w-4" /> Eliminar Elemento
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  )}
 
                   <h3 className="font-bold text-center text-lg md:text-xl pointer-events-none lowercase tracking-widest px-4 break-words opacity-60">
                     {element.name}
@@ -558,7 +568,9 @@ export function SeatingPlan({
         
         {!isFullscreen && (
           <div className="absolute bottom-4 left-4 right-4 sm:right-auto sm:max-w-xs bg-background/90 backdrop-blur border border-border rounded-lg p-3 shadow-sm text-xs text-muted-foreground pointer-events-none">
-            Clica el engrane para cambiar la figura/color. Arrastra las esquinas para cambiar el tamaño.
+            {canEdit 
+              ? "Clica el engrane para cambiar la figura/color. Arrastra las esquinas para cambiar el tamaño."
+              : "La distribución física del croquis está en modo solo lectura para el staff."}
           </div>
         )}
       </div>
@@ -583,7 +595,7 @@ export function SeatingPlan({
                 <TabsTrigger value="croquis" className="text-xs gap-2"><Map className="h-3.5 w-3.5" /> Croquis</TabsTrigger>
               </TabsList>
             </Tabs>
-            {role === "admin" && (
+            {canEdit && (
               <div className="flex flex-wrap gap-2">
                 <Button 
                   onClick={() => setShowTableForm(true)}
@@ -638,7 +650,7 @@ export function SeatingPlan({
                         Total: {1 + g.companions} lugar{1 + g.companions > 1 ? 'es' : ''}
                       </p>
                     </div>
-                    <Select onValueChange={(tableId) => onAssignGuest(g.id, tableId)}>
+                    <Select onValueChange={(tableId) => onAssignGuest(g.id, tableId)} disabled={!canManageGuests}>
                       <SelectTrigger className="h-8 w-[100px] text-xs bg-card">
                         <SelectValue placeholder="Asignar..." />
                       </SelectTrigger>
@@ -667,76 +679,93 @@ export function SeatingPlan({
           <div className={cn("items-start w-full", unassigned.length > 0 && !isFullscreen ? "col-span-full xl:col-span-2" : "col-span-full")}>
             
             {view === "list" && !isFullscreen ? (
-              /* VISTA DE LISTA (Grilla de Mesas) */
-              <div className="grid gap-4 sm:grid-cols-2">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                 {event.tables.map((table) => {
                   const occupied = getOccupied(table.id);
                   const guestsInTable = getTableGuests(table.id);
                   const pct = Math.min((occupied / table.capacity) * 100, 100);
                   const isFull = occupied >= table.capacity;
                   const isOverflown = occupied > table.capacity;
-
                   const colorObj = COLOR_PALETTE.find(c => c.class === table.color) || COLOR_PALETTE[0];
 
                   return (
-                    <div key={table.id} className="relative rounded-2xl bg-card border border-border overflow-hidden transition-all hover:shadow-md hover:border-border/80">
+                    <div 
+                      key={table.id} 
+                      className="group relative rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 overflow-hidden transition-all duration-300 hover:shadow-2xl hover:-translate-y-1.5"
+                    >
                       <div 
-                        className={cn("h-1.5 w-full", isFull ? (isOverflown ? "bg-red-500" : "bg-emerald-500") : "")} 
+                        className={cn("h-2.5 w-full", isOverflown ? "bg-red-500" : (isFull ? "bg-emerald-500" : ""))} 
                         style={{ backgroundColor: !isFull ? colorObj.hex : undefined }}
                       />
-                      <div className="p-4">
-                        <div className="flex items-start justify-between mb-4">
-                          <div>
-                            <h4 
-                              className="font-bold text-foreground truncate max-w-[200px]" 
-                              style={{ color: !isFull ? colorObj.hex : undefined }}
-                              title={table.name}
-                            >
+                      <div className="p-6">
+                        <div className="flex items-start justify-between mb-5">
+                          <div className="min-w-0 flex-1">
+                            <h4 className="font-black text-foreground text-xl truncate tracking-tight group-hover:text-amber-600 transition-colors">
                               {table.name}
                             </h4>
-                            <div className="flex items-center gap-1.5 text-xs text-muted-foreground mt-1">
-                              <Users className="h-3.5 w-3.5" />
-                              <span className={cn("font-medium", isFull ? (isOverflown ? "text-red-500" : "text-emerald-500") : "text-foreground")}>
-                                {occupied}
-                              </span> 
-                              / {table.capacity} lugares
+                            <div className="flex items-center gap-2 mt-1 px-0.5">
+                              <Badge className={cn(
+                                "text-[10px] font-black uppercase tracking-tighter px-2 h-5 border-none shadow-sm",
+                                isOverflown ? "bg-red-500 text-white animate-pulse" : 
+                                (isFull ? "bg-emerald-500 text-white" : "bg-slate-100 dark:bg-slate-800 text-slate-500")
+                              )}>
+                                {occupied} / {table.capacity} OCUPADOS
+                              </Badge>
                             </div>
                           </div>
-                          <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground/50 hover:text-red-500 hover:bg-red-500/10" onClick={() => onDeleteTable(table.id)}>
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
+                          {canEdit && (
+                            <button 
+                              className="h-9 w-9 rounded-xl flex items-center justify-center text-slate-200 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 transition-all opacity-0 group-hover:opacity-100" 
+                              onClick={(e) => { e.stopPropagation(); onDeleteTable(table.id); }}
+                              title="Eliminar mesa"
+                            >
+                              <Trash2 className="h-4.5 w-4.5" />
+                            </button>
+                          )}
                         </div>
 
-                        <div className="h-2 w-full bg-muted rounded-full overflow-hidden mb-5">
+                        <div className="h-2 w-full bg-slate-50 dark:bg-slate-800 rounded-full overflow-hidden mb-6 shadow-inner">
                           <div 
-                            className={cn("h-full rounded-full transition-all duration-500", isOverflown ? "bg-red-500" : (isFull ? "bg-emerald-500" : "bg-blue-500"))} 
-                            style={{ width: `${pct}%` }} 
-                          />
+                            className={cn("h-full rounded-full transition-all duration-700 ease-out relative", isOverflown ? "bg-red-500" : (isFull ? "bg-emerald-500" : "bg-amber-400"))} 
+                            style={{ 
+                              width: `${pct}%`,
+                              backgroundColor: (!isFull && !isOverflown) ? colorObj.hex : undefined 
+                            }} 
+                          >
+                            <div className="absolute inset-0 bg-white/20 animate-pulse" />
+                          </div>
                         </div>
 
-                        <div className="space-y-1.5 min-h-[60px] max-h-[150px] overflow-y-auto pr-1">
+                        <div className="space-y-2 min-h-[80px] max-h-[300px] overflow-y-auto pr-1 no-scrollbar">
+                          <div className="text-[10px] uppercase font-black tracking-widest text-slate-400 mb-3 ml-1">Invitados Asignados</div>
                           {guestsInTable.length === 0 ? (
-                            <p className="text-xs text-muted-foreground text-center py-4 italic">Mesa vacía</p>
+                            <div className="flex flex-col items-center justify-center py-8 opacity-40">
+                               <Users className="h-6 w-6 mb-2" />
+                               <p className="text-[10px] font-bold uppercase">Mesa vacía</p>
+                            </div>
                           ) : (
                             guestsInTable.map((g) => (
-                              <div key={g.id} className="flex items-center justify-between group rounded-lg p-1.5 -mx-1.5 hover:bg-muted/50 transition-colors">
-                                <div className="flex items-center gap-2 min-w-0 pr-2">
-                                  <GripVertical className="h-3.5 w-3.5 text-muted-foreground/30 opacity-0 group-hover:opacity-100 transition-opacity" />
+                              <div key={g.id} className="flex items-center justify-between group/guest rounded-2xl p-3 bg-slate-50/50 dark:bg-slate-800/30 border border-transparent hover:border-slate-200 dark:hover:border-slate-700 hover:bg-white dark:hover:bg-slate-800 transition-all shadow-sm">
+                                <div className="flex items-center gap-3 min-w-0 pr-2">
+                                  <div className="w-8 h-8 rounded-lg bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 flex items-center justify-center text-xs font-black text-slate-400">
+                                    {g.name.charAt(0)}
+                                  </div>
                                   <div className="min-w-0">
-                                    <p className="text-sm font-medium text-foreground truncate">{g.name}</p>
-                                    <p className="text-[10px] text-muted-foreground leading-none mt-0.5 max-w-[150px] truncate">
-                                       {g.companions > 0 ? `+${g.companions} acomp.` : 'Solo'}
+                                    <p className="text-sm font-bold text-foreground truncate">{g.name}</p>
+                                    <p className="text-[10px] font-black text-amber-600/70 uppercase tracking-tighter leading-none mt-0.5">
+                                       {g.companions > 0 ? `+${g.companions} acompañantes` : 'Sin acompañantes'}
                                     </p>
                                   </div>
                                 </div>
-                                <Button 
-                                  variant="ghost" 
-                                  size="icon" 
-                                  className="h-6 w-6 text-muted-foreground hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all shrink-0" 
-                                  onClick={() => onAssignGuest(g.id, null)}
-                                >
-                                  <X className="h-3 w-3" />
-                                </Button>
+                                {canManageGuests && (
+                                  <button 
+                                    className="h-8 w-8 rounded-lg text-slate-300 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 transition-all shrink-0 flex items-center justify-center opacity-0 group-hover/guest:opacity-100" 
+                                    onClick={() => onAssignGuest(g.id, null)}
+                                    title="Quitar de mesa"
+                                  >
+                                    <X className="h-4 w-4" />
+                                  </button>
+                                )}
                               </div>
                             ))
                           )}

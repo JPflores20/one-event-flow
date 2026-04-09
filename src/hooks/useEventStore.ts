@@ -42,6 +42,15 @@ export interface EventElement {
   color?: string;
 }
 
+export interface FinancialTransaction {
+  id: string;
+  type: "income" | "expense";
+  amount: number;
+  description: string;
+  category: string;
+  date: string;
+}
+
 export interface EventData {
   id: string;
   name: string;
@@ -51,6 +60,8 @@ export interface EventData {
   tables: EventTable[];
   elements: EventElement[];
   timeline: TimelineItem[];
+  financials: FinancialTransaction[];
+  customCategories?: string[];
   code: string;
   createdAt: string;
 }
@@ -70,6 +81,8 @@ export function useEventStore() {
           ...docData, 
           elements: docData.elements || [],
           timeline: docData.timeline || [],
+          financials: docData.financials || [],
+          customCategories: docData.customCategories || [],
           code: docData.code || "000000" // Default code for old events
         });
       });
@@ -90,6 +103,8 @@ export function useEventStore() {
       tables: [],
       elements: [],
       timeline: [],
+      financials: [],
+      customCategories: [],
       code: Math.floor(100000 + Math.random() * 900000).toString(),
       createdAt: new Date().toISOString(),
     };
@@ -262,6 +277,52 @@ export function useEventStore() {
         const eventDoc = await transaction.get(eventRef);
         if (!eventDoc.exists()) return;
         transaction.update(eventRef, { timeline });
+      });
+    }, []),
+    addTransaction: useCallback(async (eventId: string, transactionData: Omit<FinancialTransaction, "id">) => {
+      const eventRef = doc(db, "events", eventId);
+      await runTransaction(db, async (transaction) => {
+        const eventDoc = await transaction.get(eventRef);
+        if (!eventDoc.exists()) throw "Document does not exist!";
+        const data = eventDoc.data() as EventData;
+        const newTransaction: FinancialTransaction = { 
+          ...transactionData, 
+          id: crypto.randomUUID() 
+        };
+        const financials = data.financials || [];
+        transaction.update(eventRef, { financials: [...financials, newTransaction] });
+      });
+    }, []),
+    updateTransaction: useCallback(async (eventId: string, transactionId: string, updates: Partial<FinancialTransaction>) => {
+      const eventRef = doc(db, "events", eventId);
+      await runTransaction(db, async (transaction) => {
+        const eventDoc = await transaction.get(eventRef);
+        if (!eventDoc.exists()) throw "Document does not exist!";
+        const data = eventDoc.data() as EventData;
+        const financials = (data.financials || []).map(t => t.id === transactionId ? { ...t, ...updates } : t);
+        transaction.update(eventRef, { financials });
+      });
+    }, []),
+    deleteTransaction: useCallback(async (eventId: string, transactionId: string) => {
+      const eventRef = doc(db, "events", eventId);
+      await runTransaction(db, async (transaction) => {
+        const eventDoc = await transaction.get(eventRef);
+        if (!eventDoc.exists()) throw "Document does not exist!";
+        const data = eventDoc.data() as EventData;
+        const financials = (data.financials || []).filter(t => t.id !== transactionId);
+        transaction.update(eventRef, { financials });
+      });
+    }, []),
+    addCustomCategory: useCallback(async (eventId: string, category: string) => {
+      const eventRef = doc(db, "events", eventId);
+      await runTransaction(db, async (transaction) => {
+        const eventDoc = await transaction.get(eventRef);
+        if (!eventDoc.exists()) throw "Document does not exist!";
+        const data = eventDoc.data() as EventData;
+        const customCategories = data.customCategories || [];
+        if (!customCategories.includes(category)) {
+          transaction.update(eventRef, { customCategories: [...customCategories, category] });
+        }
       });
     }, [])
   };

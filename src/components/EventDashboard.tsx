@@ -83,6 +83,7 @@ export function EventDashboard({ events, loading, onCreateEvent, onDeleteEvent, 
   const [date, setDate] = useState<Date>();
   const [location, setLocation] = useState("");
   const [eventToDelete, setEventToDelete] = useState<string | null>(null);
+  const [userToDelete, setUserToDelete] = useState<string | null>(null);
   const [selectedDashboardDate, setSelectedDashboardDate] = useState<Date | undefined>(undefined);
   const [searchTerm, setSearchTerm] = useState("");
   
@@ -91,6 +92,7 @@ export function EventDashboard({ events, loading, onCreateEvent, onDeleteEvent, 
   const [authorizedUsers, setAuthorizedUsers] = useState<any[]>([]);
   const [isLoadingUsers, setIsLoadingUsers] = useState(false);
   const [editingUserId, setEditingUserId] = useState<string | null>(null);
+  const [editingDraft, setEditingDraft] = useState<any>(null);
   
   const [newEmail, setNewEmail] = useState("");
   const [newPassword, setNewPassword] = useState("");
@@ -134,22 +136,30 @@ export function EventDashboard({ events, loading, onCreateEvent, onDeleteEvent, 
       
       await fetchUsers();
       setEditingUserId(null);
+      setEditingDraft(null);
     } catch (error) {
       console.error("Error updating user:", error);
       alert("Error al actualizar el usuario.");
     }
   };
 
-  const handleDeleteUser = async (email: string) => {
-    if (!confirm(`¿Estás seguro de que deseas eliminar el acceso a ${email}?`)) return;
+  const handleDeleteUser = (email: string) => {
+    setUserToDelete(email);
+  };
+
+  const confirmDeleteUser = async () => {
+    if (!userToDelete) return;
     try {
-      await deleteDoc(doc(db, "authorized_emails", email));
+      await deleteDoc(doc(db, "authorized_emails", userToDelete));
       await fetchUsers();
     } catch (error) {
       console.error("Error deleting user:", error);
       alert("Error al eliminar el acceso.");
+    } finally {
+      setUserToDelete(null);
     }
   };
+
 
   const handleCreate = (e: React.FormEvent) => {
     e.preventDefault();
@@ -614,6 +624,29 @@ export function EventDashboard({ events, loading, onCreateEvent, onDeleteEvent, 
         </AlertDialogContent>
       </AlertDialog>
 
+      {/* Delete User confirmation dialog */}
+      <AlertDialog open={!!userToDelete} onOpenChange={(open) => !open && setUserToDelete(null)}>
+        <AlertDialogContent className="bg-card border-border">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-foreground">¿Eliminar acceso de usuario?</AlertDialogTitle>
+            <AlertDialogDescription className="text-muted-foreground">
+              Estás a punto de revocar el acceso de forma permanente al usuario <strong>{userToDelete}</strong>. Ya no podrá visualizar ni administrar ninguno de los módulos compartidos. No se puede deshacer.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="gap-2">
+            <AlertDialogCancel className="bg-muted text-foreground border-border hover:bg-muted/80">
+              Conservar Acceso
+            </AlertDialogCancel>
+            <AlertDialogAction 
+              className="bg-red-500 hover:bg-red-600 text-white font-bold"
+              onClick={confirmDeleteUser}
+            >
+              Sí, Revocar Acceso
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
       {/* User Management Dialog */}
       <Dialog open={showUserMgmt} onOpenChange={setShowUserMgmt}>
         <DialogContent className="sm:max-w-2xl bg-card border-border max-h-[90vh] overflow-hidden flex flex-col p-0">
@@ -647,7 +680,8 @@ export function EventDashboard({ events, loading, onCreateEvent, onDeleteEvent, 
                   ) : (
                     authorizedUsers.map((u) => {
                       const isEditing = editingUserId === u.id;
-                      const userPerms = u.permissions || (u.role === "admin" ? DEFAULT_ADMIN_PERMISSIONS : DEFAULT_STAFF_PERMISSIONS);
+                      const activeRole = isEditing && editingDraft ? editingDraft.role : u.role;
+                      const activePerms = isEditing && editingDraft ? editingDraft.permissions : (u.permissions || (u.role === "admin" ? DEFAULT_ADMIN_PERMISSIONS : DEFAULT_STAFF_PERMISSIONS));
                       
                       return (
                         <div 
@@ -677,13 +711,24 @@ export function EventDashboard({ events, loading, onCreateEvent, onDeleteEvent, 
                             </div>
                             
                             <div className="flex items-center gap-2">
-                              {u.id !== "pepe.jlfc.16@gmail.com" && (
+                              {u.id !== "pepe.jlfc.16@gmail.com" && u.id !== "isaalexandra40@gmail.com" && (
                                 <>
                                   <Button 
                                     variant="ghost" 
                                     size="icon" 
                                     className={cn("h-9 w-9 rounded-xl", isEditing && "text-amber-600 bg-amber-100")}
-                                    onClick={() => setEditingUserId(isEditing ? null : u.id)}
+                                    onClick={() => {
+                                      if (isEditing) {
+                                        setEditingUserId(null);
+                                        setEditingDraft(null);
+                                      } else {
+                                        setEditingUserId(u.id);
+                                        setEditingDraft({
+                                          role: u.role,
+                                          permissions: u.permissions || (u.role === "admin" ? DEFAULT_ADMIN_PERMISSIONS : DEFAULT_STAFF_PERMISSIONS)
+                                        });
+                                      }
+                                    }}
                                   >
                                     <Settings className="h-4 w-4" />
                                   </Button>
@@ -700,30 +745,30 @@ export function EventDashboard({ events, loading, onCreateEvent, onDeleteEvent, 
                             </div>
                           </div>
 
-                          {isEditing && (
+                          {isEditing && editingDraft && (
                             <div className="px-4 pb-5 pt-2 border-t border-amber-400/20 space-y-5 animate-in slide-in-from-top-2 duration-300">
                               <div className="space-y-3">
                                 <Label className="text-[10px] font-black uppercase text-amber-700 tracking-widest">Rol del Usuario</Label>
                                 <div className="flex gap-2">
                                   <Button 
                                     size="sm"
-                                    variant={u.role === "staff" ? "default" : "outline"}
-                                    onClick={() => handleUpdateUser(u.id, { 
+                                    variant={activeRole === "staff" ? "default" : "outline"}
+                                    onClick={() => setEditingDraft({ 
                                       role: "staff", 
                                       permissions: DEFAULT_STAFF_PERMISSIONS 
                                     })}
-                                    className={cn("flex-1 h-8 text-[10px] font-bold uppercase", u.role === "staff" && "bg-amber-400 text-black hover:bg-amber-300")}
+                                    className={cn("flex-1 h-8 text-[10px] font-bold uppercase", activeRole === "staff" && "bg-amber-400 text-black hover:bg-amber-300")}
                                   >
                                     Asignar Staff
                                   </Button>
                                   <Button 
                                     size="sm"
-                                    variant={u.role === "admin" ? "default" : "outline"}
-                                    onClick={() => handleUpdateUser(u.id, { 
+                                    variant={activeRole === "admin" ? "default" : "outline"}
+                                    onClick={() => setEditingDraft({ 
                                       role: "admin", 
                                       permissions: DEFAULT_ADMIN_PERMISSIONS 
                                     })}
-                                    className={cn("flex-1 h-8 text-[10px] font-bold uppercase", u.role === "admin" && "bg-black text-white hover:bg-zinc-800")}
+                                    className={cn("flex-1 h-8 text-[10px] font-bold uppercase", activeRole === "admin" && "bg-black text-white hover:bg-zinc-800")}
                                   >
                                     Asignar Admin
                                   </Button>
@@ -744,10 +789,11 @@ export function EventDashboard({ events, loading, onCreateEvent, onDeleteEvent, 
                                       </div>
                                     </div>
                                     <Switch 
-                                      disabled={u.role === "admin"}
-                                      checked={userPerms.canViewAccounting}
-                                      onCheckedChange={(checked) => handleUpdateUser(u.id, {
-                                        permissions: { ...userPerms, canViewAccounting: checked }
+                                      disabled={activeRole === "admin"}
+                                      checked={activePerms.canViewAccounting}
+                                      onCheckedChange={(checked) => setEditingDraft({
+                                        ...editingDraft,
+                                        permissions: { ...activePerms, canViewAccounting: checked }
                                       })}
                                     />
                                   </div>
@@ -763,10 +809,11 @@ export function EventDashboard({ events, loading, onCreateEvent, onDeleteEvent, 
                                       </div>
                                     </div>
                                     <Switch 
-                                      disabled={u.role === "admin"}
-                                      checked={userPerms.canEditCroquis}
-                                      onCheckedChange={(checked) => handleUpdateUser(u.id, {
-                                        permissions: { ...userPerms, canEditCroquis: checked }
+                                      disabled={activeRole === "admin"}
+                                      checked={activePerms.canEditCroquis}
+                                      onCheckedChange={(checked) => setEditingDraft({
+                                        ...editingDraft,
+                                        permissions: { ...activePerms, canEditCroquis: checked }
                                       })}
                                     />
                                   </div>
@@ -782,10 +829,11 @@ export function EventDashboard({ events, loading, onCreateEvent, onDeleteEvent, 
                                       </div>
                                     </div>
                                     <Switch 
-                                      disabled={u.role === "admin"}
-                                      checked={userPerms.canManageGuests}
-                                      onCheckedChange={(checked) => handleUpdateUser(u.id, {
-                                        permissions: { ...userPerms, canManageGuests: checked }
+                                      disabled={activeRole === "admin"}
+                                      checked={activePerms.canManageGuests}
+                                      onCheckedChange={(checked) => setEditingDraft({
+                                        ...editingDraft,
+                                        permissions: { ...activePerms, canManageGuests: checked }
                                       })}
                                     />
                                   </div>
@@ -801,19 +849,40 @@ export function EventDashboard({ events, loading, onCreateEvent, onDeleteEvent, 
                                       </div>
                                     </div>
                                     <Switch 
-                                      disabled={u.role === "admin"}
-                                      checked={userPerms.canEditTimeline}
-                                      onCheckedChange={(checked) => handleUpdateUser(u.id, {
-                                        permissions: { ...userPerms, canEditTimeline: checked }
+                                      disabled={activeRole === "admin"}
+                                      checked={activePerms.canEditTimeline}
+                                      onCheckedChange={(checked) => setEditingDraft({
+                                        ...editingDraft,
+                                        permissions: { ...activePerms, canEditTimeline: checked }
                                       })}
                                     />
                                   </div>
                                 </div>
-                                {u.role === "admin" && (
+                                {activeRole === "admin" && (
                                   <p className="text-[9px] text-muted-foreground italic text-center">
                                     * Los administradores tienen todos los permisos habilitados por defecto.
                                   </p>
                                 )}
+                              </div>
+                              
+                              <div className="flex justify-end gap-2 pt-2 border-t border-border mt-4">
+                                  <Button 
+                                    size="sm"
+                                    variant="ghost"
+                                    onClick={() => {
+                                      setEditingUserId(null);
+                                      setEditingDraft(null);
+                                    }}
+                                  >
+                                    Cancelar
+                                  </Button>
+                                  <Button 
+                                    size="sm"
+                                    className="bg-amber-400 hover:bg-amber-300 text-black font-semibold"
+                                    onClick={() => handleUpdateUser(u.id, editingDraft)}
+                                  >
+                                    Guardar Cambios
+                                  </Button>
                               </div>
                             </div>
                           )}

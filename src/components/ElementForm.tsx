@@ -9,12 +9,12 @@ import { Shapes } from "lucide-react";
 interface ElementFormProps {
   open: boolean;
   onClose: () => void;
-  onSubmit: (name: string, shape: "rect" | "square" | "circle") => void;
+  onSubmit: (name: string, shape: "rect" | "square" | "circle" | "line-h" | "line-v") => void;
 }
 
 export function ElementForm({ open, onClose, onSubmit }: ElementFormProps) {
   const [name, setName] = useState("");
-  const [shape, setShape] = useState<"rect" | "square" | "circle">("rect");
+  const [shape, setShape] = useState<"rect" | "square" | "circle" | "line-h" | "line-v">("rect");
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -56,6 +56,8 @@ export function ElementForm({ open, onClose, onSubmit }: ElementFormProps) {
                 <SelectItem value="rect">Rectángulo</SelectItem>
                 <SelectItem value="square">Cuadrado</SelectItem>
                 <SelectItem value="circle">Círculo</SelectItem>
+                <SelectItem value="line-h">Línea Horizontal</SelectItem>
+                <SelectItem value="line-v">Línea Vertical</SelectItem>
               </SelectContent>
             </Select>
           </div>

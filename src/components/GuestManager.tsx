@@ -47,6 +47,11 @@ export function GuestManager({ event, onAddGuest, onUpdateGuest, onDeleteGuest, 
     return Array.from(tags).sort();
   }, [event.guests]);
 
+  const getTableName = (tableId: string | null) => {
+    if (!tableId) return null;
+    return event.tables.find(t => t.id === tableId)?.name ?? null;
+  };
+
   const filtered = useMemo(() => {
     let list = event.guests;
     if (filterStatus !== "all") list = list.filter(g => g.status === filterStatus);
@@ -70,11 +75,6 @@ export function GuestManager({ event, onAddGuest, onUpdateGuest, onDeleteGuest, 
     arrived:   event.guests.filter(g => g.status === "arrived").length,
     cancelled: event.guests.filter(g => g.status === "cancelled").length,
   }), [event.guests]);
-
-  const getTableName = (tableId: string | null) => {
-    if (!tableId) return null;
-    return event.tables.find(t => t.id === tableId)?.name ?? null;
-  };
 
   const handleImport = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];

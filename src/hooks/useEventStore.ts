@@ -27,14 +27,14 @@ export interface EventTable {
   y?: number;
   width?: number;
   height?: number;
-  shape?: "rect" | "square" | "circle";
+  shape?: "rect" | "square" | "circle" | "oval" | "diamond" | "triangle" | "hexagon";
   color?: string;
 }
 
 export interface EventElement {
   id: string;
   name: string;
-  shape: "rect" | "square" | "circle";
+  shape: "rect" | "square" | "circle" | "line-h" | "line-v";
   x?: number;
   y?: number;
   width?: number;
@@ -153,7 +153,7 @@ export function useEventStore() {
     });
   }, []);
 
-  const addTable = useCallback(async (eventId: string, name: string, capacity: number) => {
+  const addTable = useCallback(async (eventId: string, name: string, capacity: number, shape?: "rect" | "square" | "circle" | "oval" | "diamond" | "triangle" | "hexagon") => {
     const eventRef = doc(db, "events", eventId);
     await runTransaction(db, async (transaction) => {
       const eventDoc = await transaction.get(eventRef);
@@ -164,6 +164,7 @@ export function useEventStore() {
         id: crypto.randomUUID(), 
         name, 
         capacity,
+        shape,
         x: count * 40, 
         y: count * 30 
       };
@@ -218,7 +219,7 @@ export function useEventStore() {
     });
   }, []);
 
-  const addElement = useCallback(async (eventId: string, name: string, shape: "rect" | "square" | "circle") => {
+  const addElement = useCallback(async (eventId: string, name: string, shape: "rect" | "square" | "circle" | "line-h" | "line-v") => {
     const eventRef = doc(db, "events", eventId);
     await runTransaction(db, async (transaction) => {
       const eventDoc = await transaction.get(eventRef);

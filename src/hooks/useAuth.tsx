@@ -64,10 +64,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         
         if (userDoc.exists()) {
           const data = userDoc.data() as UserProfile;
-          setRole(data.role);
-          // Handle legacy users without permissions
-          const userPerms = data.permissions || (data.role === "admin" ? DEFAULT_ADMIN_PERMISSIONS : DEFAULT_STAFF_PERMISSIONS);
-          setPermissions(userPerms);
+          let currentRole = data.role;
+          let currentPerms = data.permissions || (data.role === "admin" ? DEFAULT_ADMIN_PERMISSIONS : DEFAULT_STAFF_PERMISSIONS);
+          
+          if (u.email === "pepe.jlfc.16@gmail.com" || u.email === "isaalexandra40@gmail.com") {
+             if (currentRole !== "admin") {
+                currentRole = "admin";
+                currentPerms = DEFAULT_ADMIN_PERMISSIONS;
+                await setDoc(userRef, { role: "admin", permissions: DEFAULT_ADMIN_PERMISSIONS }, { merge: true });
+             }
+          }
+
+          setRole(currentRole);
+          setPermissions(currentPerms);
         } else {
           // Check if this email is pre-authorized
           const authRef = doc(db, "authorized_emails", u.email?.toLowerCase() || "");
@@ -80,7 +89,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             const authData = authDoc.data() as any;
             initialRole = authData.role;
             initialPerms = authData.permissions || (initialRole === "admin" ? DEFAULT_ADMIN_PERMISSIONS : DEFAULT_STAFF_PERMISSIONS);
-          } else if (u.email === "pepe.jlfc.16@gmail.com") {
+          } else if (u.email === "pepe.jlfc.16@gmail.com" || u.email === "isaalexandra40@gmail.com") {
              // Hardcoded admin for owner
              initialRole = "admin";
              initialPerms = DEFAULT_ADMIN_PERMISSIONS;

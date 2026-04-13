@@ -21,7 +21,7 @@ interface EventWorkspaceProps {
   onAddGuest: (guest: Omit<Guest, "id">) => void;
   onUpdateGuest: (guestId: string, updates: Partial<Guest>) => void;
   onDeleteGuest: (guestId: string) => void;
-  onAddTable: (name: string, capacity: number) => void;
+  onAddTable: (name: string, capacity: number, shape?: "rect" | "square" | "circle" | "oval" | "diamond" | "triangle" | "hexagon") => void;
   onDeleteTable: (tableId: string) => void;
   onUpdateTableProps: (tableId: string, updates: Partial<EventTable>) => void;
   onAssignGuest: (guestId: string, tableId: string | null) => void;

@@ -4,7 +4,7 @@ import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
 import { useAuth } from "@/hooks/useAuth";
 import { Rnd } from "react-rnd";
-import { Plus, Trash2, X, Users, GripVertical, Sofa, LayoutGrid, Map, Maximize2, Minimize2, Circle, Square, RectangleHorizontal, Settings2, Info, Download } from "lucide-react";
+import { Plus, Trash2, X, Users, GripVertical, Sofa, LayoutGrid, Map, Maximize2, Minimize2, Circle, Square, RectangleHorizontal, Settings2, Info, Download, Diamond, Triangle, Hexagon, Minus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -221,7 +221,7 @@ export function SeatingPlan({
     });
   };
 
-  const handleChangeShape = (tableId: string, shape: "rect" | "square" | "circle") => {
+  const handleChangeShape = (tableId: string, shape: "rect" | "square" | "circle" | "oval" | "diamond" | "triangle" | "hexagon") => {
     onUpdateTableProps(tableId, { shape });
   };
 
@@ -242,7 +242,7 @@ export function SeatingPlan({
     });
   };
 
-  const handleElementChangeShape = (elementId: string, shape: "rect" | "square" | "circle") => {
+  const handleElementChangeShape = (elementId: string, shape: "rect" | "square" | "circle" | "line-h" | "line-v") => {
     onUpdateElementProps(elementId, { shape });
   };
 
@@ -331,7 +331,12 @@ export function SeatingPlan({
               
               const isCircle = table.shape === "circle";
               const isSquare = table.shape === "square";
-              const forceAspect = isCircle || isSquare;
+              const isOval = table.shape === "oval";
+              const isDiamond = table.shape === "diamond";
+              const isTriangle = table.shape === "triangle";
+              const isHexagon = table.shape === "hexagon";
+              const isPolygonal = isDiamond || isTriangle || isHexagon;
+              const forceAspect = isCircle || isSquare || isPolygonal;
 
               const initialX = table.x !== undefined ? table.x : (index * 40);
               const initialY = table.y !== undefined ? table.y : (index * 30);
@@ -355,22 +360,49 @@ export function SeatingPlan({
                   onDragStop={(e, d) => handleDragStop(table.id, d)}
                   onResizeStop={(e, direction, ref, delta, position) => handleResizeStop(table.id, ref, position)}
                   className={cn(
-                    "bg-card border-2 shadow-sm hover:shadow-md transition-all duration-300 z-10 flex flex-col group overflow-visible",
-                    isCircle ? "rounded-full" : "rounded-xl",
-                    highlightedTableId === table.id && "ring-8 ring-offset-4 ring-offset-background z-50 scale-110"
+                    "shadow-sm hover:shadow-md transition-shadow duration-300 z-10 flex flex-col group overflow-visible relative",
+                    isCircle ? "rounded-full" : (isOval ? "rounded-[999px]" : "rounded-xl"),
+                    !isPolygonal && "bg-card border-2",
+                    highlightedTableId === table.id && "z-50",
+                    highlightedTableId === table.id && !isPolygonal && "ring-8 ring-offset-4 ring-offset-background"
                   )}
                   style={{
-                    borderColor: highlightedTableId === table.id 
+                    borderColor: (!isPolygonal && highlightedTableId === table.id) 
                       ? colorObj.hex 
-                      : (isFull 
+                      : (!isPolygonal && isFull 
                           ? (isOverflown ? "#ef4444" : "#10b981") 
-                          : (table.color ? colorObj.hex + "80" : undefined)),
-                    boxShadow: highlightedTableId === table.id 
+                          : (!isPolygonal && table.color ? colorObj.hex + "80" : undefined)),
+                    boxShadow: highlightedTableId === table.id && !isPolygonal 
                       ? `0 0 40px ${colorObj.hex}` 
                       : undefined,
-                    transition: "all 0.4s cubic-bezier(0.4, 0, 0.2, 1)"
+                    transition: "box-shadow 0.4s cubic-bezier(0.4, 0, 0.2, 1), border-color 0.4s cubic-bezier(0.4, 0, 0.2, 1)"
                   }}
                 >
+                  {isPolygonal && (
+                    <div className="absolute inset-0 pointer-events-none z-[-1]" style={{ 
+                        filter: highlightedTableId === table.id ? `drop-shadow(0 0 20px ${colorObj.hex})` : undefined 
+                    }}>
+                       <svg width="100%" height="100%" viewBox="0 0 100 100" preserveAspectRatio="none">
+                          <polygon 
+                             points={
+                               isDiamond ? "50,2 98,50 50,98 2,50" : 
+                               isTriangle ? "50,2 98,98 2,98" : 
+                               "25,2 75,2 98,50 75,98 25,98 2,50"
+                             }
+                             style={{
+                               fill: "hsl(var(--card))",
+                               stroke: highlightedTableId === table.id 
+                                 ? colorObj.hex 
+                                 : (isFull 
+                                     ? (isOverflown ? "#ef4444" : "#10b981") 
+                                     : (table.color ? colorObj.hex + "80" : "hsl(var(--border))")),
+                               strokeWidth: 2,
+                               vectorEffect: "non-scaling-stroke"
+                             }}
+                          />
+                       </svg>
+                    </div>
+                  )}
                   <TooltipProvider>
                     <Tooltip>
                       <TooltipTrigger asChild>
@@ -397,6 +429,18 @@ export function SeatingPlan({
                                   </DropdownMenuItem>
                                   <DropdownMenuItem onClick={() => handleChangeShape(table.id, "circle")}>
                                     <Circle className="mr-2 h-4 w-4" /> Circular
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem onClick={() => handleChangeShape(table.id, "oval")}>
+                                    <RectangleHorizontal className="mr-2 h-4 w-4 rounded-full" /> Óvalo
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem onClick={() => handleChangeShape(table.id, "diamond")}>
+                                    <Diamond className="mr-2 h-4 w-4" /> Diamante
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem onClick={() => handleChangeShape(table.id, "triangle")}>
+                                    <Triangle className="mr-2 h-4 w-4" /> Triángulo
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem onClick={() => handleChangeShape(table.id, "hexagon")}>
+                                    <Hexagon className="mr-2 h-4 w-4" /> Hexágono
                                   </DropdownMenuItem>
                                   <DropdownMenuSeparator />
                                   <DropdownMenuLabel className="text-[10px] uppercase tracking-wider text-muted-foreground">Color</DropdownMenuLabel>
@@ -483,6 +527,8 @@ export function SeatingPlan({
               const defaultHeight = 200;
               const isCircle = element.shape === "circle";
               const isSquare = element.shape === "square";
+              const isLineH = element.shape === "line-h";
+              const isLineV = element.shape === "line-v";
               const forceAspect = isCircle || isSquare;
               
               const elementColor = COLOR_PALETTE.find(c => c.class === element.color) || COLOR_PALETTE[0];
@@ -493,24 +539,32 @@ export function SeatingPlan({
                   default={{
                     x: element.x || 0,
                     y: element.y || 0,
-                    width: element.width || defaultWidth,
-                    height: element.height || (isCircle || isSquare ? defaultWidth : defaultHeight),
+                    width: element.width || (isLineV ? 8 : defaultWidth),
+                    height: element.height || (isLineH ? 8 : (isCircle || isSquare ? defaultWidth : defaultHeight)),
                   }}
-                  minWidth={100}
-                  minHeight={isCircle || isSquare ? 100 : 60}
+                  minWidth={isLineV ? 4 : (isCircle || isSquare ? 100 : 60)}
+                  minHeight={isLineH ? 4 : (isCircle || isSquare ? 100 : 60)}
                   lockAspectRatio={forceAspect}
                   bounds="parent"
                   dragHandleClassName="drag-handle"
                   disableDragging={role === "staff"}
-                  enableResizing={role === "admin"}
+                  enableResizing={
+                    role === "admin"
+                      ? (isLineH ? { left: true, right: true, top: false, bottom: false, topRight: false, bottomRight: false, bottomLeft: false, topLeft: false } :
+                         isLineV ? { top: true, bottom: true, left: false, right: false, topRight: false, bottomRight: false, bottomLeft: false, topLeft: false } :
+                         true)
+                      : false
+                  }
                   onDragStop={(e, d) => handleElementDragStop(element.id, d)}
                   onResizeStop={(e, direction, ref, delta, position) => handleElementResizeStop(element.id, ref, position)}
                   className={cn(
-                    "flex items-center justify-center border-2 border-dashed bg-background/40 hover:bg-background/60 transition-colors duration-200 z-0",
+                    "flex items-center justify-center transition-colors duration-200 z-0",
+                    isLineH || isLineV ? "border-none" : "border-2 border-dashed bg-background/40 hover:bg-background/60",
                     isCircle ? "rounded-full" : "rounded-md"
                   )}
                   style={{
-                    borderColor: element.color ? elementColor.hex + "80" : undefined,
+                    borderColor: element.color && !isLineH && !isLineV ? elementColor.hex + "80" : undefined,
+                    backgroundColor: (isLineH || isLineV) && element.color ? elementColor.hex : undefined,
                     color: element.color ? elementColor.hex : undefined
                   }}
                 >
@@ -532,6 +586,12 @@ export function SeatingPlan({
                         </DropdownMenuItem>
                         <DropdownMenuItem onClick={() => handleElementChangeShape(element.id, "circle")}>
                           <Circle className="mr-2 h-4 w-4" /> Círculo
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => handleElementChangeShape(element.id, "line-h")}>
+                          <Minus className="mr-2 h-4 w-4" /> Línea (H)
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => handleElementChangeShape(element.id, "line-v")}>
+                          <Minus className="mr-2 h-4 w-4 rotate-90" /> Línea (V)
                         </DropdownMenuItem>
                         <DropdownMenuSeparator />
                         <DropdownMenuLabel className="text-[10px] uppercase tracking-wider text-muted-foreground">Color</DropdownMenuLabel>
@@ -557,9 +617,11 @@ export function SeatingPlan({
                     </DropdownMenu>
                   )}
 
-                  <h3 className="font-bold text-center text-lg md:text-xl pointer-events-none lowercase tracking-widest px-4 break-words opacity-60">
-                    {element.name}
-                  </h3>
+                  {!isLineH && !isLineV && (
+                    <h3 className="font-bold text-center text-lg md:text-xl pointer-events-none lowercase tracking-widest px-4 break-words opacity-60">
+                      {element.name}
+                    </h3>
+                  )}
                 </Rnd>
               );
             })}

@@ -4,7 +4,7 @@ import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
 import { useAuth } from "@/hooks/useAuth";
 import { Rnd } from "react-rnd";
-import { Plus, Trash2, X, Users, GripVertical, Sofa, LayoutGrid, Map, Maximize2, Minimize2, Circle, Square, RectangleHorizontal, Settings2, Info, Download, Diamond, Triangle, Hexagon, Minus } from "lucide-react";
+import { Plus, Trash2, X, Users, GripVertical, Sofa, LayoutGrid, Map, Maximize2, Minimize2, Circle, Square, RectangleHorizontal, Settings2, Info, Download, Diamond, Triangle, Hexagon, Minus, RotateCw, Edit2, MoreVertical } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -33,7 +33,7 @@ const COLOR_PALETTE = [
 
 interface SeatingPlanProps {
   event: EventData;
-  onAddTable: (name: string, capacity: number) => void;
+  onAddTable: (name: string, capacity: number, shape?: "rect" | "square" | "circle" | "oval" | "diamond" | "triangle" | "hexagon" | "l-shape" | "l-shape-tl" | "l-shape-tr" | "l-shape-br") => void;
   onDeleteTable: (tableId: string) => void;
   onUpdateTableProps: (tableId: string, updates: Partial<EventTable>) => void;
   onAssignGuest: (guestId: string, tableId: string | null) => void;
@@ -52,10 +52,12 @@ export function SeatingPlan({
   const canEdit = role === "admin" || permissions?.canEditCroquis;
   const canManageGuests = role === "admin" || permissions?.canManageGuests;
   const [showTableForm, setShowTableForm] = useState(false);
+  const [editingTableId, setEditingTableId] = useState<string | null>(null);
   const [showElementForm, setShowElementForm] = useState(false);
   const [view, setView] = useState<"list" | "croquis">("list");
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [expandedTableId, setExpandedTableId] = useState<string | null>(null);
+  const [tempRotations, setTempRotations] = useState<Record<string, number>>({});
   const croquisRef = useRef<HTMLDivElement>(null);
 
   // Automatically switch to croquis view and fullscreen when a table is highlighted
@@ -221,12 +223,26 @@ export function SeatingPlan({
     });
   };
 
-  const handleChangeShape = (tableId: string, shape: "rect" | "square" | "circle" | "oval" | "diamond" | "triangle" | "hexagon") => {
+  const handleChangeShape = (tableId: string, shape: "rect" | "square" | "circle" | "oval" | "diamond" | "triangle" | "hexagon" | "l-shape" | "l-shape-tl" | "l-shape-tr" | "l-shape-br") => {
     onUpdateTableProps(tableId, { shape });
   };
 
   const handleChangeColor = (tableId: string, color: string) => {
     onUpdateTableProps(tableId, { color });
+  };
+
+  const handleTableFormSubmit = (name: string, capacity: number, shape?: any) => {
+    if (editingTableId) {
+      onUpdateTableProps(editingTableId, { name, capacity, shape });
+      setEditingTableId(null);
+    } else {
+      onAddTable(name, capacity, shape);
+    }
+  };
+
+  const handleRotateTable = (tableId: string, currentRotation?: number) => {
+    const newRotation = ((currentRotation || 0) + 45) % 360;
+    onUpdateTableProps(tableId, { rotation: newRotation });
   };
 
   const handleElementDragStop = (elementId: string, d: { x: number, y: number }) => {
@@ -248,6 +264,62 @@ export function SeatingPlan({
 
   const handleElementChangeColor = (elementId: string, color: string) => {
     onUpdateElementProps(elementId, { color });
+  };
+
+  const handleRotateElement = (elementId: string, currentRotation?: number) => {
+    const newRotation = ((currentRotation || 0) + 45) % 360;
+    onUpdateElementProps(elementId, { rotation: newRotation });
+  };
+
+  const handleRotationStart = (e: React.MouseEvent, id: string, isElement: boolean) => {
+    e.stopPropagation();
+    e.preventDefault();
+    
+    // Usamos una caja interna invisible sin el 'handle' que sobresale para calcular el centro matemáticamente perfecto
+    const element = document.getElementById(`box-${id}`);
+    if (!element) return;
+    
+    const rect = element.getBoundingClientRect();
+    const centerX = rect.left + rect.width / 2;
+    const centerY = rect.top + rect.height / 2;
+
+    const handleMouseMove = (moveEvent: MouseEvent) => {
+       const dx = moveEvent.clientX - centerX;
+       const dy = moveEvent.clientY - centerY;
+       // atan2 returns angle in radians from X axis. We add 90 so 12 o'clock is 0 deg.
+       let angle = Math.atan2(dy, dx) * (180 / Math.PI) + 90;
+       if (moveEvent.shiftKey) {
+         angle = Math.round(angle / 15) * 15;
+       }
+       setTempRotations(prev => ({ ...prev, [id]: angle }));
+    };
+
+    const handleMouseUp = (upEvent: MouseEvent) => {
+       document.removeEventListener('mousemove', handleMouseMove);
+       document.removeEventListener('mouseup', handleMouseUp);
+       
+       const dx = upEvent.clientX - centerX;
+       const dy = upEvent.clientY - centerY;
+       let angle = Math.atan2(dy, dx) * (180 / Math.PI) + 90;
+       if (upEvent.shiftKey) {
+         angle = Math.round(angle / 15) * 15;
+       }
+
+       setTempRotations(prev => {
+         const newRots = { ...prev };
+         delete newRots[id];
+         return newRots;
+       });
+       
+       if (isElement) {
+         onUpdateElementProps(id, { rotation: angle });
+       } else {
+         onUpdateTableProps(id, { rotation: angle });
+       }
+    };
+
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
   };
 
   // VISTA CROQUIS
@@ -335,7 +407,12 @@ export function SeatingPlan({
               const isDiamond = table.shape === "diamond";
               const isTriangle = table.shape === "triangle";
               const isHexagon = table.shape === "hexagon";
-              const isPolygonal = isDiamond || isTriangle || isHexagon;
+              const isLShape = table.shape === "l-shape";
+              const isLShapeTL = table.shape === "l-shape-tl";
+              const isLShapeTR = table.shape === "l-shape-tr";
+              const isLShapeBR = table.shape === "l-shape-br";
+              const isAnyLShape = isLShape || isLShapeTL || isLShapeTR || isLShapeBR;
+              const isPolygonal = isDiamond || isTriangle || isHexagon || isAnyLShape;
               const forceAspect = isCircle || isSquare || isPolygonal;
 
               const initialX = table.x !== undefined ? table.x : (index * 40);
@@ -348,15 +425,15 @@ export function SeatingPlan({
                     x: initialX,
                     y: initialY,
                     width: table.width || defaultWidth,
-                    height: table.height || (isCircle || isSquare ? defaultWidth : defaultHeight),
+                    height: table.height || (isCircle || isSquare || isPolygonal ? defaultWidth : defaultHeight),
                   }}
                   minWidth={120}
                   minHeight={isCircle || isSquare ? 120 : 80}
                   lockAspectRatio={forceAspect}
                   bounds="parent"
                   dragHandleClassName="drag-handle"
-                  disableDragging={role === "staff"}
-                  enableResizing={role === "admin"}
+                  disableDragging={!canEdit}
+                  enableResizing={canEdit}
                   onDragStop={(e, d) => handleDragStop(table.id, d)}
                   onResizeStop={(e, direction, ref, delta, position) => handleResizeStop(table.id, ref, position)}
                   className={cn(
@@ -387,6 +464,10 @@ export function SeatingPlan({
                              points={
                                isDiamond ? "50,2 98,50 50,98 2,50" : 
                                isTriangle ? "50,2 98,98 2,98" : 
+                               isLShape ? "2,2 45,2 45,55 98,55 98,98 2,98" :
+                               isLShapeTL ? "2,2 98,2 98,45 45,45 45,98 2,98" :
+                               isLShapeTR ? "2,2 98,2 98,98 55,98 55,45 2,45" :
+                               isLShapeBR ? "98,2 98,98 2,98 2,55 55,55 55,2" :
                                "25,2 75,2 98,50 75,98 25,98 2,50"
                              }
                              style={{
@@ -410,8 +491,17 @@ export function SeatingPlan({
                           "flex-1 flex flex-col items-center justify-center relative p-3 w-full h-full",
                           isCircle && "px-6"
                         )}>
-                          <div className="drag-handle absolute top-0 left-0 right-0 p-2 flex items-center justify-between cursor-grab active:cursor-grabbing opacity-80 hover:opacity-100">
+                          <div className={cn(
+                            "drag-handle absolute p-2 flex items-center cursor-grab active:cursor-grabbing opacity-80 hover:opacity-100",
+                            (isLShapeTR || isLShapeBR) ? "top-0 right-0 w-[45%] justify-between" : "top-0 left-0",
+                            (isLShape || isLShapeTL) ? "w-[45%] justify-between" : (!isLShapeTR && !isLShapeBR && isPolygonal ? "right-0 justify-center gap-6" : (!isLShapeTR && !isLShapeBR ? "right-0 justify-between" : ""))
+                          )}>
                              <GripVertical className={cn("h-4 w-4 text-muted-foreground/40 shrink-0", !canEdit && "hidden")} />
+                          </div>
+                          <div className={cn(
+                             "absolute z-30 pointer-events-auto",
+                             isLShape ? "top-2 left-8" : isLShapeBR ? "bottom-2 right-2" : "top-2 right-2"
+                           )}>
                              {canEdit && (
                                <DropdownMenu>
                                 <DropdownMenuTrigger asChild>
@@ -442,6 +532,18 @@ export function SeatingPlan({
                                   <DropdownMenuItem onClick={() => handleChangeShape(table.id, "hexagon")}>
                                     <Hexagon className="mr-2 h-4 w-4" /> Hexágono
                                   </DropdownMenuItem>
+                                  <DropdownMenuItem onClick={() => handleChangeShape(table.id, "l-shape")}>
+                                    <svg className="mr-2 h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="7 3 7 21 21 21" /></svg> Forma de L (Abajo Izq)
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem onClick={() => handleChangeShape(table.id, "l-shape-br")}>
+                                    <svg className="mr-2 h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="21 3 21 21 7 21" /></svg> Forma de L (Abajo Der)
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem onClick={() => handleChangeShape(table.id, "l-shape-tl")}>
+                                    <svg className="mr-2 h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="7 21 7 3 21 3" /></svg> Forma de L (Arriba Izq)
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem onClick={() => handleChangeShape(table.id, "l-shape-tr")}>
+                                    <svg className="mr-2 h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="7 3 21 3 21 21" /></svg> Forma de L (Arriba Der)
+                                  </DropdownMenuItem>
                                   <DropdownMenuSeparator />
                                   <DropdownMenuLabel className="text-[10px] uppercase tracking-wider text-muted-foreground">Color</DropdownMenuLabel>
                                   <div className="grid grid-cols-5 gap-1.5 p-2">
@@ -459,6 +561,10 @@ export function SeatingPlan({
                                     ))}
                                   </div>
                                   <DropdownMenuSeparator />
+                                  <DropdownMenuItem onClick={() => setEditingTableId(table.id)}>
+                                    <Edit2 className="mr-2 h-4 w-4" /> Editar Propiedades
+                                  </DropdownMenuItem>
+                                  <DropdownMenuSeparator />
                                   <DropdownMenuItem onClick={() => onDeleteTable(table.id)} className="text-red-500 focus:bg-red-50 focus:text-red-600 dark:focus:bg-red-950/50">
                                     <Trash2 className="mr-2 h-4 w-4" /> Eliminar Mesa
                                   </DropdownMenuItem>
@@ -466,9 +572,19 @@ export function SeatingPlan({
                                </DropdownMenu>
                              )}
                           </div>
-                          <div className="text-center mt-2 pointer-events-none select-none">
+                          <div className={cn(
+                             "text-center pointer-events-none select-none",
+                             isAnyLShape ? "absolute w-[40%] flex flex-col items-center justify-center p-1" : "mt-2",
+                             isLShape && "bottom-3 left-3",
+                             isLShapeTL && "top-3 left-3",
+                             isLShapeTR && "top-3 right-3",
+                             isLShapeBR && "bottom-3 right-3"
+                           )}>
                              <h5 
-                              className="font-bold text-sm truncate max-w-[90%] mx-auto leading-tight mb-1"
+                              className={cn(
+                                "font-bold text-sm truncate w-full px-1 mx-auto leading-tight mb-1",
+                                isAnyLShape && "text-[10px]"
+                              )}
                               style={{ color: !isFull && table.color ? colorObj.hex : undefined }}
                              >
                               {table.name}
@@ -486,11 +602,14 @@ export function SeatingPlan({
                              <Button 
                                 variant="ghost" 
                                 size="sm" 
-                                className="mt-2 h-7 gap-1 text-[10px] uppercase font-bold pointer-events-auto hover:bg-muted"
+                                className={cn(
+                                  "mt-2 h-7 gap-1 text-[10px] uppercase font-bold pointer-events-auto hover:bg-muted",
+                                  isAnyLShape && "text-[8px] px-1 h-6 w-[110%] ml-[-5%] overflow-hidden"
+                                )}
                                 onClick={() => setExpandedTableId(table.id)}
                              >
-                                <Users className="h-3 w-3" />
-                                Ver Invitados
+                                <Users className={cn("h-3 w-3", isAnyLShape && "shrink-0 ml-1")} />
+                                <span className={cn(isAnyLShape && "truncate pr-1", "whitespace-nowrap")}>{isAnyLShape ? "Invitados" : "Ver Invitados"}</span>
                              </Button>
                           </div>
                         </div>
@@ -547,9 +666,9 @@ export function SeatingPlan({
                   lockAspectRatio={forceAspect}
                   bounds="parent"
                   dragHandleClassName="drag-handle"
-                  disableDragging={role === "staff"}
+                  disableDragging={!canEdit}
                   enableResizing={
-                    role === "admin"
+                    canEdit
                       ? (isLineH ? { left: true, right: true, top: false, bottom: false, topRight: false, bottomRight: false, bottomLeft: false, topLeft: false } :
                          isLineV ? { top: true, bottom: true, left: false, right: false, topRight: false, bottomRight: false, bottomLeft: false, topLeft: false } :
                          true)
@@ -565,9 +684,21 @@ export function SeatingPlan({
                   style={{
                     borderColor: element.color && !isLineH && !isLineV ? elementColor.hex + "80" : undefined,
                     backgroundColor: (isLineH || isLineV) && element.color ? elementColor.hex : undefined,
-                    color: element.color ? elementColor.hex : undefined
+                    color: element.color ? elementColor.hex : undefined,
+                    rotate: tempRotations[element.id] !== undefined ? `${tempRotations[element.id]}deg` : (element.rotation ? `${element.rotation}deg` : undefined),
+                    transformOrigin: "center center"
                   }}
                 >
+                  <div id={`box-${element.id}`} className="absolute inset-0 pointer-events-none" />
+                  {canEdit && (
+                    <div 
+                      className="absolute -top-8 left-1/2 -translate-x-1/2 w-6 h-6 bg-background border border-border rounded-full shadow-sm flex items-center justify-center cursor-alias opacity-0 group-hover:opacity-100 transition-opacity z-50 text-muted-foreground hover:text-foreground hover:border-amber-400"
+                      onMouseDown={(e) => handleRotationStart(e, element.id, true)}
+                      title="Rotar libremente (Mantén Shift para ángulos exactos)"
+                    >
+                      <RotateCw className="w-3 h-3" />
+                    </div>
+                  )}
                   <div className={cn("absolute inset-0 drag-handle", canEdit ? "cursor-grab active:cursor-grabbing" : "cursor-default")} />
                   {canEdit && (
                     <DropdownMenu>
@@ -592,6 +723,10 @@ export function SeatingPlan({
                         </DropdownMenuItem>
                         <DropdownMenuItem onClick={() => handleElementChangeShape(element.id, "line-v")}>
                           <Minus className="mr-2 h-4 w-4 rotate-90" /> Línea (V)
+                        </DropdownMenuItem>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem onClick={() => handleRotateElement(element.id, element.rotation)}>
+                          <RotateCw className="mr-2 h-4 w-4" /> Rotar 45°
                         </DropdownMenuItem>
                         <DropdownMenuSeparator />
                         <DropdownMenuLabel className="text-[10px] uppercase tracking-wider text-muted-foreground">Color</DropdownMenuLabel>
@@ -776,13 +911,22 @@ export function SeatingPlan({
                             </div>
                           </div>
                           {canEdit && (
-                            <button 
-                              className="h-9 w-9 rounded-xl flex items-center justify-center text-slate-200 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 transition-all opacity-0 group-hover:opacity-100" 
-                              onClick={(e) => { e.stopPropagation(); onDeleteTable(table.id); }}
-                              title="Eliminar mesa"
-                            >
-                              <Trash2 className="h-4.5 w-4.5" />
-                            </button>
+                            <div className="flex items-center gap-1">
+                              <button 
+                                className="h-9 w-9 rounded-xl flex items-center justify-center text-slate-200 hover:text-amber-500 hover:bg-amber-50 dark:hover:bg-amber-500/10 transition-all opacity-0 group-hover:opacity-100" 
+                                onClick={(e) => { e.stopPropagation(); setEditingTableId(table.id); }}
+                                title="Editar mesa"
+                              >
+                                <Edit2 className="h-4.5 w-4.5" />
+                              </button>
+                              <button 
+                                className="h-9 w-9 rounded-xl flex items-center justify-center text-slate-200 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 transition-all opacity-0 group-hover:opacity-100" 
+                                onClick={(e) => { e.stopPropagation(); onDeleteTable(table.id); }}
+                                title="Eliminar mesa"
+                              >
+                                <Trash2 className="h-4.5 w-4.5" />
+                              </button>
+                            </div>
                           )}
                         </div>
 
@@ -845,7 +989,12 @@ export function SeatingPlan({
         </div>
       )}
 
-      <TableForm open={showTableForm} onClose={() => setShowTableForm(false)} onSubmit={onAddTable} />
+      <TableForm 
+        open={showTableForm || !!editingTableId} 
+        onClose={() => { setShowTableForm(false); setEditingTableId(null); }} 
+        onSubmit={handleTableFormSubmit}
+        initialData={editingTableId ? event.tables.find(t => t.id === editingTableId) : null}
+      />
       <ElementForm open={showElementForm} onClose={() => setShowElementForm(false)} onSubmit={onAddElement} />
 
       {/* MODAL DE INVITADOS PARA EL CROQUIS */}
@@ -912,14 +1061,16 @@ export function SeatingPlan({
                                   {guest.companions + 1} lugares ocupados
                                 </span>
                               </div>
-                              <Button 
-                                variant="ghost" 
-                                size="sm" 
-                                className="h-7 text-[10px] font-bold text-red-500 hover:text-white hover:bg-red-500 rounded-full px-3 transition-colors"
-                                onClick={() => onAssignGuest(guest.id, null)}
-                              >
-                                Quitar de mesa
-                              </Button>
+                              {canManageGuests && (
+                                <Button 
+                                  variant="ghost" 
+                                  size="sm" 
+                                  className="h-7 text-[10px] font-bold text-red-500 hover:text-white hover:bg-red-500 rounded-full px-3 transition-colors"
+                                  onClick={() => onAssignGuest(guest.id, null)}
+                                >
+                                  Quitar de mesa
+                                </Button>
+                              )}
                             </div>
                           </div>
                         ))}

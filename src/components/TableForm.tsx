@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -8,22 +8,33 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 interface TableFormProps {
   open: boolean;
   onClose: () => void;
-  onClose: () => void;
-  onSubmit: (name: string, capacity: number, shape?: "rect" | "square" | "circle" | "oval" | "diamond" | "triangle" | "hexagon") => void;
+  onSubmit: (name: string, capacity: number, shape?: "rect" | "square" | "circle" | "oval" | "diamond" | "triangle" | "hexagon" | "l-shape" | "l-shape-tl" | "l-shape-tr" | "l-shape-br") => void;
+  initialData?: { name?: string, capacity?: number, shape?: string } | null;
 }
 
-export function TableForm({ open, onClose, onSubmit }: TableFormProps) {
+export function TableForm({ open, onClose, onSubmit, initialData }: TableFormProps) {
   const [name, setName] = useState("");
   const [capacity, setCapacity] = useState("8");
-  const [shape, setShape] = useState<"rect" | "square" | "circle" | "oval" | "diamond" | "triangle" | "hexagon" | undefined>("rect");
+  const [shape, setShape] = useState<any>("rect");
+
+  useEffect(() => {
+    if (open) {
+      if (initialData) {
+        setName(initialData.name || "");
+        setCapacity(initialData.capacity?.toString() || "8");
+        setShape(initialData.shape || "rect");
+      } else {
+        setName("");
+        setCapacity("8");
+        setShape("rect");
+      }
+    }
+  }, [open, initialData]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim()) return;
     onSubmit(name.trim(), parseInt(capacity) || 8, shape);
-    setName("");
-    setCapacity("8");
-    setShape("rect");
     onClose();
   };
 
@@ -31,7 +42,7 @@ export function TableForm({ open, onClose, onSubmit }: TableFormProps) {
     <Dialog open={open} onOpenChange={onClose}>
       <DialogContent className="sm:max-w-md bg-card border-border shadow-2xl">
         <DialogHeader>
-          <DialogTitle className="text-foreground">Nueva Mesa</DialogTitle>
+          <DialogTitle className="text-foreground">{initialData ? "Editar Mesa" : "Nueva Mesa"}</DialogTitle>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-2">
@@ -70,6 +81,10 @@ export function TableForm({ open, onClose, onSubmit }: TableFormProps) {
                 <SelectItem value="diamond">Diamante</SelectItem>
                 <SelectItem value="triangle">Triángulo</SelectItem>
                 <SelectItem value="hexagon">Hexágono</SelectItem>
+                <SelectItem value="l-shape">Forma en L (Abajo Izquierda)</SelectItem>
+                <SelectItem value="l-shape-br">Forma en L (Abajo Derecha)</SelectItem>
+                <SelectItem value="l-shape-tl">Forma en L (Arriba Izquierda)</SelectItem>
+                <SelectItem value="l-shape-tr">Forma en L (Arriba Derecha)</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -78,7 +93,7 @@ export function TableForm({ open, onClose, onSubmit }: TableFormProps) {
               Cancelar
             </Button>
             <Button type="submit" className="bg-amber-400 hover:bg-amber-300 text-black font-semibold">
-              Crear Mesa
+              {initialData ? "Guardar Cambios" : "Crear Mesa"}
             </Button>
           </DialogFooter>
         </form>

@@ -27,8 +27,9 @@ export interface EventTable {
   y?: number;
   width?: number;
   height?: number;
-  shape?: "rect" | "square" | "circle" | "oval" | "diamond" | "triangle" | "hexagon";
+  shape?: "rect" | "square" | "circle" | "oval" | "diamond" | "triangle" | "hexagon" | "l-shape" | "l-shape-tl" | "l-shape-tr" | "l-shape-br";
   color?: string;
+  rotation?: number;
 }
 
 export interface EventElement {
@@ -40,6 +41,7 @@ export interface EventElement {
   width?: number;
   height?: number;
   color?: string;
+  rotation?: number;
 }
 
 export interface FinancialTransaction {
@@ -153,7 +155,7 @@ export function useEventStore() {
     });
   }, []);
 
-  const addTable = useCallback(async (eventId: string, name: string, capacity: number, shape?: "rect" | "square" | "circle" | "oval" | "diamond" | "triangle" | "hexagon") => {
+  const addTable = useCallback(async (eventId: string, name: string, capacity: number, shape?: "rect" | "square" | "circle" | "oval" | "diamond" | "triangle" | "hexagon" | "l-shape") => {
     const eventRef = doc(db, "events", eventId);
     await runTransaction(db, async (transaction) => {
       const eventDoc = await transaction.get(eventRef);
@@ -164,10 +166,12 @@ export function useEventStore() {
         id: crypto.randomUUID(), 
         name, 
         capacity,
-        shape,
         x: count * 40, 
         y: count * 30 
       };
+      if (shape) {
+        newTable.shape = shape;
+      }
       transaction.update(eventRef, { tables: [...data.tables, newTable] });
     });
   }, []);

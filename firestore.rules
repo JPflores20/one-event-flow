@@ -1,0 +1,256 @@
+rules_version = '2';
+
+// ===============================================================
+// Assumed Data Model
+// ===============================================================
+//
+// This security rules file assumes the following data structures:
+//
+// Collection: users
+// Document ID: {userId} (Firebase Auth UID)
+// Fields:
+//   - email: string (required, max 254 chars, valid email) - User email address (PII)
+//   - role: string (required, enum: ['admin', 'staff']) - Assigned user role
+//   - permissions: map (optional, keys: ['canViewAccounting', 'canEditCroquis', 'canManageGuests', 'canEditTimeline'])
+//   - createdAt: string (optional, max 64 chars) - ISO creation timestamp
+//
+// Collection: authorized_emails
+// Document ID: {email} (Lowercase email address)
+// Fields:
+//   - role: string (required, enum: ['admin', 'staff']) - Assigned user role
+//   - permissions: map (required, keys: ['canViewAccounting', 'canEditCroquis', 'canManageGuests', 'canEditTimeline'])
+//   - invitedBy: string (optional, max 254 chars) - Admin email who invited user
+//   - createdAt: string (optional, max 64 chars) - ISO creation timestamp
+//
+// Collection: events
+// Document ID: {eventId} (UUID)
+// Fields:
+//   - id: string (required, max 128 chars, immutable)
+//   - name: string (required, 1..200 chars)
+//   - date: string (required, max 64 chars)
+//   - location: string (required, 1..300 chars)
+//   - code: string (required, 1..16 chars, immutable)
+//   - createdAt: string (required, max 64 chars, immutable)
+//   - guests: list (required, max 5000 items)
+//   - tables: list (required, max 500 items)
+//   - elements: list (optional, max 500 items)
+//   - timeline: list (optional, max 500 items)
+//   - financials: list (optional, max 2000 items)
+//   - customCategories: list (optional, max 200 items)
+//
+// Subcollection: events/{eventId}/financials
+// Document ID: {txId} (UUID)
+// Fields:
+//   - id: string (required, max 128 chars, immutable)
+//   - type: string (required, enum: ['income', 'expense'])
+//   - amount: number (required, >= 0)
+//   - description: string (required, 1..500 chars)
+//   - category: string (required, 1..120 chars)
+//   - date: string (required, max 32 chars)
+//
+// ===============================================================
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+
+    function isAuthenticated() {
+      return request.auth != null && request.auth.token.email != null;
+    }
+
+    function currentUserEmail() {
+      return request.auth.token.email.lower();
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isPermanentOwner() {
+      return isAuthenticated() &&
+        (currentUserEmail() == 'pepe.jlfc.16@gmail.com' ||
+         currentUserEmail() == 'isaalexandra40@gmail.com');
+    }
+
+    function authEmailDoc() {
+      return get(/databases/$(database)/documents/authorized_emails/$(currentUserEmail()));
+    }
+
+    function hasAuthEmailDoc() {
+      return isAuthenticated() &&
+        exists(/databases/$(database)/documents/authorized_emails/$(currentUserEmail()));
+    }
+
+    function isAuthorizedUser() {
+      return isPermanentOwner() || hasAuthEmailDoc();
+    }
+
+    function isAdmin() {
+      return isPermanentOwner() ||
+        (hasAuthEmailDoc() && authEmailDoc().data.role == 'admin');
+    }
+
+    function hasPermission(permKey) {
+      return isAdmin() ||
+        (hasAuthEmailDoc() &&
+         'permissions' in authEmailDoc().data &&
+         permKey in authEmailDoc().data.permissions &&
+         authEmailDoc().data.permissions[permKey] == true);
+    }
+
+    function hasRequiredFields(data, fields) {
+      return data.keys().hasAll(fields);
+    }
+
+    function hasOnlyAllowedFields(data, fields) {
+      return data.keys().hasOnly(fields);
+    }
+
+    function isValidEmail(email) {
+      return email is string &&
+        email.size() >= 3 &&
+        email.size() <= 254 &&
+        email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
+    }
+
+    function isValidList(listVal, maxSize) {
+      return listVal is list && listVal.size() <= maxSize;
+    }
+
+    // ===============================================================
+    // Domain Validators
+    // ===============================================================
+
+    function isValidPermissions(perms) {
+      return perms is map &&
+        perms.keys().hasOnly(['canViewAccounting', 'canEditCroquis', 'canManageGuests', 'canEditTimeline']) &&
+        perms.canViewAccounting is bool &&
+        perms.canEditCroquis is bool &&
+        perms.canManageGuests is bool &&
+        perms.canEditTimeline is bool;
+    }
+
+    function isValidAuthorizedEmail(data) {
+      return hasRequiredFields(data, ['role', 'permissions']) &&
+        hasOnlyAllowedFields(data, ['role', 'permissions', 'invitedBy', 'createdAt']) &&
+        data.role in ['admin', 'staff'] &&
+        isValidPermissions(data.permissions) &&
+        (!('invitedBy' in data) || (data.invitedBy is string && data.invitedBy.size() <= 254)) &&
+        (!('createdAt' in data) || (data.createdAt is string && data.createdAt.size() <= 64));
+    }
+
+    function isValidUser(data) {
+      return hasRequiredFields(data, ['email', 'role']) &&
+        hasOnlyAllowedFields(data, ['email', 'role', 'permissions', 'createdAt', 'updatedAt']) &&
+        isValidEmail(data.email) &&
+        data.role in ['admin', 'staff'] &&
+        (!('permissions' in data) || isValidPermissions(data.permissions)) &&
+        (!('createdAt' in data) || (data.createdAt is string && data.createdAt.size() <= 64)) &&
+        (!('updatedAt' in data) || (data.updatedAt is string && data.updatedAt.size() <= 64));
+    }
+
+    function matchesAuthorizedRole(data) {
+      return (isPermanentOwner() && data.role == 'admin') ||
+        (hasAuthEmailDoc() && data.role == authEmailDoc().data.role);
+    }
+
+    function isValidEvent(data) {
+      return hasRequiredFields(data, ['id', 'name', 'date', 'location', 'guests', 'tables', 'code', 'createdAt']) &&
+        hasOnlyAllowedFields(data, ['id', 'name', 'date', 'location', 'guests', 'tables', 'elements', 'timeline', 'financials', 'customCategories', 'code', 'createdAt']) &&
+        data.id is string && data.id.size() >= 1 && data.id.size() <= 128 &&
+        data.name is string && data.name.size() >= 1 && data.name.size() <= 200 &&
+        data.date is string && data.date.size() >= 1 && data.date.size() <= 64 &&
+        data.location is string && data.location.size() >= 1 && data.location.size() <= 300 &&
+        data.code is string && data.code.size() >= 1 && data.code.size() <= 16 &&
+        data.createdAt is string && data.createdAt.size() >= 1 && data.createdAt.size() <= 64 &&
+        isValidList(data.guests, 5000) &&
+        isValidList(data.tables, 500) &&
+        (!('elements' in data) || isValidList(data.elements, 500)) &&
+        (!('timeline' in data) || isValidList(data.timeline, 500)) &&
+        (!('financials' in data) || isValidList(data.financials, 2000)) &&
+        (!('customCategories' in data) || isValidList(data.customCategories, 200));
+    }
+
+    function isValidFinancialTransaction(data) {
+      return hasRequiredFields(data, ['id', 'type', 'amount', 'description', 'category', 'date']) &&
+        hasOnlyAllowedFields(data, ['id', 'type', 'amount', 'description', 'category', 'date']) &&
+        data.id is string && data.id.size() >= 1 && data.id.size() <= 128 &&
+        data.type in ['income', 'expense'] &&
+        data.amount is number && data.amount >= 0 && data.amount <= 1000000000 &&
+        data.description is string && data.description.size() >= 1 && data.description.size() <= 500 &&
+        data.category is string && data.category.size() >= 1 && data.category.size() <= 120 &&
+        data.date is string && data.date.size() >= 1 && data.date.size() <= 32;
+    }
+
+    // ===============================================================
+    // Collection Rules
+    // ===============================================================
+
+    // Users collection (contains PII: email; strict owner or admin access)
+    match /users/{userId} {
+      allow read: if isOwner(userId) || isAdmin();
+      allow create: if isAuthenticated() &&
+        isValidUser(request.resource.data) &&
+        ((isOwner(userId) &&
+          request.resource.data.email.lower() == currentUserEmail() &&
+          matchesAuthorizedRole(request.resource.data)) ||
+         isAdmin());
+      allow update: if isAuthenticated() &&
+        isValidUser(request.resource.data) &&
+        ((isOwner(userId) &&
+          request.resource.data.email == resource.data.email &&
+          matchesAuthorizedRole(request.resource.data)) ||
+         isAdmin());
+      allow delete: if isAdmin();
+    }
+
+    // Authorized emails collection (RBAC source of truth)
+    match /authorized_emails/{email} {
+      allow read: if isAdmin() || (isAuthenticated() && currentUserEmail() == email);
+      allow create: if isAdmin() && isValidAuthorizedEmail(request.resource.data);
+      allow update: if isAdmin() &&
+        isValidAuthorizedEmail(request.resource.data) &&
+        !(email in ['pepe.jlfc.16@gmail.com', 'isaalexandra40@gmail.com'] && request.resource.data.role != 'admin');
+      allow delete: if isAdmin() &&
+        !(email in ['pepe.jlfc.16@gmail.com', 'isaalexandra40@gmail.com']);
+    }
+
+    // Events collection
+    match /events/{eventId} {
+      allow read: if isAuthorizedUser();
+      allow create: if isAdmin() &&
+        isValidEvent(request.resource.data) &&
+        request.resource.data.id == eventId;
+      allow update: if isAuthorizedUser() &&
+        isValidEvent(request.resource.data) &&
+        request.resource.data.id == resource.data.id &&
+        request.resource.data.createdAt == resource.data.createdAt &&
+        request.resource.data.code == resource.data.code;
+      allow delete: if isAdmin();
+
+      // Financials subcollection (restricted to Admin or staff with canViewAccounting)
+      match /financials/{txId} {
+        allow read: if exists(/databases/$(database)/documents/events/$(eventId)) &&
+          hasPermission('canViewAccounting');
+        allow create: if exists(/databases/$(database)/documents/events/$(eventId)) &&
+          hasPermission('canViewAccounting') &&
+          isValidFinancialTransaction(request.resource.data) &&
+          request.resource.data.id == txId;
+        allow update: if exists(/databases/$(database)/documents/events/$(eventId)) &&
+          hasPermission('canViewAccounting') &&
+          isValidFinancialTransaction(request.resource.data) &&
+          request.resource.data.id == resource.data.id;
+        allow delete: if exists(/databases/$(database)/documents/events/$(eventId)) &&
+          hasPermission('canViewAccounting');
+      }
+    }
+
+    // Default deny for any unmatched path
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

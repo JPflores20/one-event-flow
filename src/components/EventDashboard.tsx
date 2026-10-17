@@ -26,15 +26,25 @@ import {
   BarChart3, 
   Calendar as CalendarIcon, 
   Layout, 
-  DollarSign 
+  DollarSign,
+  Copy,
+  Edit2
 } from "lucide-react";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
-import { doc, setDoc, collection, getDocs, updateDoc, deleteDoc } from "firebase/firestore";
+import { doc, setDoc, collection, getDocs, updateDoc, deleteDoc, query, where } from "firebase/firestore";
 import { initializeApp, deleteApp } from "firebase/app";
 import { getAuth, createUserWithEmailAndPassword } from "firebase/auth";
 import { db, firebaseConfig } from "@/lib/firebase";
-import { useAuth, DEFAULT_ADMIN_PERMISSIONS, DEFAULT_STAFF_PERMISSIONS, type UserPermissions } from "@/hooks/useAuth";
+import {
+  useAuth,
+  DEFAULT_ADMIN_PERMISSIONS,
+  DEFAULT_STAFF_PERMISSIONS,
+  isOwnerEmail,
+  type UserPermissions,
+  type UserRole,
+  type AuthorizedUserRecord,
+} from "@/hooks/useAuth";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
   DropdownMenu,
@@ -65,20 +75,40 @@ import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useState, useEffect } from "react";
-import { cn, normalizeString, getGoogleCalendarUrl } from "@/lib/utils";
+import { cn, normalizeString, getGoogleCalendarUrl, calculateAttendanceStats, getEventCountdownBadge } from "@/lib/utils";
 import { useTheme } from "@/hooks/useTheme";
+import { useToast } from "@/hooks/use-toast";
 import type { EventData } from "@/hooks/useEventStore";
 
 interface EventDashboardProps {
   events: EventData[];
   loading?: boolean;
+  error?: string | null;
   onCreateEvent: (name: string, date: string, location: string) => void;
+  onUpdateEvent?: (eventId: string, updates: Partial<Pick<EventData, "name" | "date" | "location" | "budget">>) => Promise<void>;
+  onDuplicateEvent?: (sourceEventId: string, customName?: string) => Promise<string>;
   onDeleteEvent: (eventId: string) => void;
   onSelectEvent: (eventId: string) => void;
 }
 
-export function EventDashboard({ events, loading, onCreateEvent, onDeleteEvent, onSelectEvent }: EventDashboardProps) {
+interface UserEditDraft {
+  role: UserRole;
+  permissions: UserPermissions;
+}
+
+export function EventDashboard({
+  events,
+  loading,
+  error,
+  onCreateEvent,
+  onUpdateEvent,
+  onDuplicateEvent,
+  onDeleteEvent,
+  onSelectEvent,
+}: EventDashboardProps) {
+  const { toast } = useToast();
   const [showCreate, setShowCreate] = useState(false);
+  const [editingEvent, setEditingEvent] = useState<EventData | null>(null);
   const [name, setName] = useState("");
   const [date, setDate] = useState<Date>();
   const [location, setLocation] = useState("");
@@ -86,19 +116,20 @@ export function EventDashboard({ events, loading, onCreateEvent, onDeleteEvent, 
   const [userToDelete, setUserToDelete] = useState<string | null>(null);
   const [selectedDashboardDate, setSelectedDashboardDate] = useState<Date | undefined>(undefined);
   const [searchTerm, setSearchTerm] = useState("");
+  const [timeFilter, setTimeFilter] = useState<"all" | "upcoming" | "past">("all");
   
   // User Management State
   const [showUserMgmt, setShowUserMgmt] = useState(false);
-  const [authorizedUsers, setAuthorizedUsers] = useState<any[]>([]);
+  const [authorizedUsers, setAuthorizedUsers] = useState<AuthorizedUserRecord[]>([]);
   const [isLoadingUsers, setIsLoadingUsers] = useState(false);
   const [editingUserId, setEditingUserId] = useState<string | null>(null);
-  const [editingDraft, setEditingDraft] = useState<any>(null);
+  const [editingDraft, setEditingDraft] = useState<UserEditDraft | null>(null);
   
   const [newEmail, setNewEmail] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [isRegistering, setIsRegistering] = useState(false);
-  const [newRole, setNewRole] = useState<"admin" | "staff">("staff");
+  const [newRole, setNewRole] = useState<UserRole>("staff");
   
   const { theme, toggleTheme } = useTheme();
   const { user, role, logout } = useAuth();
@@ -107,13 +138,16 @@ export function EventDashboard({ events, loading, onCreateEvent, onDeleteEvent, 
     setIsLoadingUsers(true);
     try {
       const querySnapshot = await getDocs(collection(db, "authorized_emails"));
-      const users = querySnapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      }));
+      const users: AuthorizedUserRecord[] = querySnapshot.docs.map((docSnap) => {
+        const data = docSnap.data() as Omit<AuthorizedUserRecord, "id">;
+        return {
+          id: docSnap.id,
+          ...data,
+        };
+      });
       setAuthorizedUsers(users);
-    } catch (error) {
-      console.error("Error fetching users:", error);
+    } catch (err) {
+      console.error("Error fetching users:", err);
     } finally {
       setIsLoadingUsers(false);
     }
@@ -125,20 +159,32 @@ export function EventDashboard({ events, loading, onCreateEvent, onDeleteEvent, 
     }
   }, [showUserMgmt]);
 
-  const handleUpdateUser = async (email: string, updates: any) => {
+  const handleUpdateUser = async (email: string, updates: UserEditDraft) => {
     try {
-      const userRef = doc(db, "authorized_emails", email);
-      await updateDoc(userRef, updates);
-      
-      // Also try to update the 'users' collection if the user has already logged in
-      // Note: We don't have the UID here easily, but we can search by email or wait for next login
-      // For now, updating authorized_emails is the source of truth for the next fetch/login.
-      
+      const normalizedEmail = email.toLowerCase().trim();
+      const userRef = doc(db, "authorized_emails", normalizedEmail);
+      await updateDoc(userRef, {
+        role: updates.role,
+        permissions: updates.permissions,
+      });
+
+      // Also sync any matching documents in the 'users' collection
+      const usersQuery = query(collection(db, "users"), where("email", "==", normalizedEmail));
+      const userSnaps = await getDocs(usersQuery);
+      await Promise.all(
+        userSnaps.docs.map((uDoc) =>
+          updateDoc(doc(db, "users", uDoc.id), {
+            role: updates.role,
+            permissions: updates.permissions,
+          })
+        )
+      );
+
       await fetchUsers();
       setEditingUserId(null);
       setEditingDraft(null);
-    } catch (error) {
-      console.error("Error updating user:", error);
+    } catch (err) {
+      console.error("Error updating user:", err);
       alert("Error al actualizar el usuario.");
     }
   };
@@ -150,10 +196,17 @@ export function EventDashboard({ events, loading, onCreateEvent, onDeleteEvent, 
   const confirmDeleteUser = async () => {
     if (!userToDelete) return;
     try {
-      await deleteDoc(doc(db, "authorized_emails", userToDelete));
+      const normalizedEmail = userToDelete.toLowerCase().trim();
+      await deleteDoc(doc(db, "authorized_emails", normalizedEmail));
+
+      // Also remove matching profile documents from 'users'
+      const usersQuery = query(collection(db, "users"), where("email", "==", normalizedEmail));
+      const userSnaps = await getDocs(usersQuery);
+      await Promise.all(userSnaps.docs.map((uDoc) => deleteDoc(doc(db, "users", uDoc.id))));
+
       await fetchUsers();
-    } catch (error) {
-      console.error("Error deleting user:", error);
+    } catch (err) {
+      console.error("Error deleting user:", err);
       alert("Error al eliminar el acceso.");
     } finally {
       setUserToDelete(null);
@@ -161,28 +214,66 @@ export function EventDashboard({ events, loading, onCreateEvent, onDeleteEvent, 
   };
 
 
-  const handleCreate = (e: React.FormEvent) => {
+  const handleOpenEditEvent = (ev: EventData) => {
+    setEditingEvent(ev);
+    setName(ev.name);
+    setDate(new Date(ev.date));
+    setLocation(ev.location);
+    setShowCreate(true);
+  };
+
+  const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim() || !date || !location.trim()) return;
-    onCreateEvent(name.trim(), date.toISOString(), location.trim());
+    if (editingEvent && onUpdateEvent) {
+      await onUpdateEvent(editingEvent.id, {
+        name: name.trim(),
+        date: date.toISOString(),
+        location: location.trim(),
+      });
+      toast({
+        title: "Evento actualizado",
+        description: "Los cambios se guardaron correctamente.",
+      });
+    } else {
+      onCreateEvent(name.trim(), date.toISOString(), location.trim());
+    }
     setName("");
     setDate(undefined);
     setLocation("");
+    setEditingEvent(null);
     setShowCreate(false);
+  };
+
+  const handleDuplicateEvent = async (ev: EventData) => {
+    if (!onDuplicateEvent) return;
+    try {
+      await onDuplicateEvent(ev.id, `${ev.name} (Plantilla)`);
+      toast({
+        title: "Evento duplicado como plantilla",
+        description: `Se copiaron las mesas, croquis y cronograma de "${ev.name}".`,
+      });
+    } catch {
+      toast({
+        title: "Error al duplicar evento",
+        variant: "destructive",
+      });
+    }
   };
 
   const isActive = (event: EventData) => new Date(event.date) >= new Date(new Date().toDateString());
 
-  const eventDates = events.map(e => new Date(new Date(e.date).toDateString()));
-  const isEventDay = (day: Date) => eventDates.some(d => d.getTime() === day.getTime());
+  const filteredEvents = events.filter((e) => {
+    const active = isActive(e);
+    if (timeFilter === "upcoming" && !active) return false;
+    if (timeFilter === "past" && active) return false;
 
-  const filteredEvents = events.filter(e => {
-    const matchesDate = selectedDashboardDate 
+    const matchesDate = selectedDashboardDate
       ? new Date(e.date).toDateString() === selectedDashboardDate.toDateString()
       : true;
     const q = normalizeString(searchTerm);
     const matchesSearch = q
-      ? normalizeString(e.name).includes(q) || 
+      ? normalizeString(e.name).includes(q) ||
         normalizeString(e.location).includes(q) ||
         normalizeString(e.code).includes(q)
       : true;
@@ -199,6 +290,7 @@ export function EventDashboard({ events, loading, onCreateEvent, onDeleteEvent, 
       </div>
     );
   }
+
 
   return (
     <div className="min-h-screen bg-background transition-colors duration-300">
@@ -221,13 +313,20 @@ export function EventDashboard({ events, loading, onCreateEvent, onDeleteEvent, 
               onClick={toggleTheme}
               className="p-2 rounded-lg border border-border bg-card text-muted-foreground hover:text-foreground hover:bg-muted transition-all"
               aria-label="Cambiar tema"
+              title={theme === "dark" ? "Cambiar a modo claro" : "Cambiar a modo oscuro"}
             >
-              {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+              {theme === "dark" ? <Sun className="h-4 w-4 text-amber-400" /> : <Moon className="h-4 w-4" />}
             </button>
 
             {role === "admin" && (
               <Button
-                onClick={() => setShowCreate(true)}
+                onClick={() => {
+                  setEditingEvent(null);
+                  setName("");
+                  setDate(undefined);
+                  setLocation("");
+                  setShowCreate(true);
+                }}
                 className="gap-2 bg-amber-400 hover:bg-amber-300 text-black font-semibold shadow-sm transition-all"
               >
                 <Plus className="h-4 w-4" />
@@ -241,7 +340,7 @@ export function EventDashboard({ events, loading, onCreateEvent, onDeleteEvent, 
                 <Button variant="ghost" className="relative h-9 w-9 rounded-full border border-border bg-card">
                   <Avatar className="h-8 w-8">
                     <AvatarImage src={user?.photoURL || ""} alt={user?.email || ""} />
-                    <AvatarFallback className="bg-amber-100 text-amber-700 font-bold uppercase text-[10px]">
+                    <AvatarFallback className="bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-300 font-bold uppercase text-[10px]">
                       {user?.email?.charAt(0) || "U"}
                     </AvatarFallback>
                   </Avatar>
@@ -284,29 +383,60 @@ export function EventDashboard({ events, loading, onCreateEvent, onDeleteEvent, 
 
       {/* Main Content with Sidebar */}
       <main className="container mx-auto px-4 sm:px-6 py-8">
+        {error && (
+          <div className="mb-6 rounded-2xl border border-red-200 dark:border-red-500/30 bg-red-50 dark:bg-red-500/10 p-4 flex items-center gap-3 text-red-600 dark:text-red-400 text-sm">
+            <AlertCircle className="h-5 w-5 shrink-0" />
+            <span>{error}</span>
+          </div>
+        )}
         <div className="flex flex-col lg:flex-row gap-8">
           {/* Main List */}
           <div className="flex-1 min-w-0">
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8 bg-white/50 dark:bg-slate-900/50 p-6 rounded-3xl border border-border shadow-sm">
-              <div>
-                <h2 className="text-xs font-black text-muted-foreground uppercase tracking-[0.2em] mb-1">
-                  Listado de Eventos
-                </h2>
-                <p className="text-2xl font-black text-foreground tracking-tight">
-                  {selectedDashboardDate 
-                    ? `Filtrado por: ${format(selectedDashboardDate, 'd MMM', { locale: es })}` 
-                    : (searchTerm ? `Búsqueda: "${searchTerm}"` : `Todos los eventos`)}
-                </p>
+            <div className="flex flex-col gap-4 mb-8 bg-card/85 dark:bg-card/90 backdrop-blur-sm p-6 rounded-3xl border border-border shadow-sm">
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div>
+                  <h2 className="text-xs font-black text-muted-foreground uppercase tracking-[0.2em] mb-1">
+                    Listado de Eventos
+                  </h2>
+                  <p className="text-2xl font-black text-foreground tracking-tight">
+                    {selectedDashboardDate 
+                      ? `Filtrado por: ${format(selectedDashboardDate, 'd MMM', { locale: es })}` 
+                      : (searchTerm ? `Búsqueda: "${searchTerm}"` : `Todos los eventos`)}
+                  </p>
+                </div>
+
+                <div className="relative w-full md:w-80 group">
+                  <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground group-focus-within:text-amber-500 transition-colors" />
+                  <Input
+                    placeholder="Buscar por nombre, lugar o código..."
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    className="pl-11 bg-background border-border h-12 text-sm focus:border-amber-400 focus:ring-amber-400/20 rounded-2xl transition-all shadow-sm"
+                  />
+                </div>
               </div>
 
-              <div className="relative w-full md:w-80 group">
-                <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 group-focus-within:text-amber-500 transition-colors" />
-                <Input
-                  placeholder="Buscar por nombre, lugar o código..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  className="pl-11 bg-background border-slate-200 dark:border-slate-800 h-12 text-sm focus:border-amber-400 focus:ring-amber-400/20 rounded-2xl transition-all shadow-sm"
-                />
+              {/* Filter Tabs: Todos / Próximos / Finalizados */}
+              <div className="flex gap-2 overflow-x-auto pb-1">
+                {([
+                  { key: "all", label: `Todos (${events.length})` },
+                  { key: "upcoming", label: `Próximos (${events.filter((e) => isActive(e)).length})` },
+                  { key: "past", label: `Finalizados (${events.filter((e) => !isActive(e)).length})` },
+                ] as const).map((tab) => (
+                  <button
+                    key={tab.key}
+                    type="button"
+                    onClick={() => setTimeFilter(tab.key)}
+                    className={cn(
+                      "px-4 py-1.5 rounded-xl text-[10px] uppercase tracking-widest font-black transition-all border",
+                      timeFilter === tab.key
+                        ? "bg-amber-400 text-black border-amber-500 shadow-sm"
+                        : "bg-background text-muted-foreground border-border hover:border-amber-400/50 hover:text-foreground"
+                    )}
+                  >
+                    {tab.label}
+                  </button>
+                ))}
               </div>
             </div>
 
@@ -353,31 +483,34 @@ export function EventDashboard({ events, loading, onCreateEvent, onDeleteEvent, 
                       .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
                       .map((event) => {
                         const active = isActive(event);
-                        const arrived = event.guests.filter(g => g.status === "arrived").length;
-                        const progress = event.guests.length > 0 ? Math.round((arrived / event.guests.length) * 100) : 0;
+                        const countdown = getEventCountdownBadge(event.date);
+                        const eventStats = calculateAttendanceStats(event.guests);
+                        const progress = eventStats.checkInPct;
 
                         return (
                           <div
                             key={event.id}
                             className={cn(
                               "group relative rounded-3xl border overflow-hidden cursor-pointer transition-all duration-300",
-                              "bg-card border-border hover:border-amber-400/40",
-                              "shadow-sm hover:shadow-2xl hover:-translate-y-1.5"
+                              "bg-card border-border hover:border-amber-400/50",
+                              "shadow-sm hover:shadow-2xl dark:hover:shadow-amber-500/5 hover:-translate-y-1.5"
                             )}
                             onClick={() => onSelectEvent(event.id)}
                           >
-                            {/* Status label floating */}
-                            <div className="absolute top-4 left-4 z-10">
-                               <Badge
-                                  className={cn(
-                                    "text-[9px] font-black uppercase tracking-widest px-2.5 py-0.5 h-5 rounded-full border-none shadow-sm",
-                                    active
-                                      ? "bg-green-500 text-white animate-pulse"
-                                      : "bg-slate-200 text-slate-500 dark:bg-slate-800"
-                                  )}
-                                >
-                                  {active ? "Activo" : "Pasado"}
-                                </Badge>
+                            {/* Status & Countdown label floating */}
+                            <div className="absolute top-4 left-4 z-10 flex items-center gap-1.5">
+                              <Badge
+                                className={cn(
+                                  "text-[9px] font-black uppercase tracking-widest px-2.5 py-0.5 h-5 rounded-full border-none shadow-sm",
+                                  countdown.variant === "today"
+                                    ? "bg-amber-400 text-black animate-bounce"
+                                    : active
+                                      ? "bg-emerald-500 text-white"
+                                      : "bg-slate-200 text-slate-600 dark:bg-slate-800 dark:text-slate-300"
+                                )}
+                              >
+                                {countdown.label}
+                              </Badge>
                             </div>
                             {/* Accent bar */}
                             <div className={cn(
@@ -388,7 +521,7 @@ export function EventDashboard({ events, loading, onCreateEvent, onDeleteEvent, 
                                 <div className="flex items-start justify-between mb-4">
                                   <div className="flex-1 min-w-0 pr-2">
                                     <div className="space-y-1">
-                                      <h3 className="font-black text-foreground text-xl leading-tight tracking-tight group-hover:text-amber-600 transition-colors">{event.name}</h3>
+                                      <h3 className="font-black text-foreground text-xl leading-tight tracking-tight group-hover:text-amber-600 dark:group-hover:text-amber-400 transition-colors">{event.name}</h3>
                                       <Badge className="w-fit bg-amber-400 text-black font-black px-2 py-0.5 text-[10px] shadow-sm border-none uppercase tracking-tighter">
                                         #{event.code}
                                       </Badge>
@@ -399,23 +532,49 @@ export function EventDashboard({ events, loading, onCreateEvent, onDeleteEvent, 
                                       href={getGoogleCalendarUrl(event)}
                                       target="_blank"
                                       rel="noopener noreferrer"
-                                      className="h-8 w-8 rounded-lg border border-transparent flex items-center justify-center text-muted-foreground/60 hover:text-amber-500 hover:bg-amber-500/10 transition-all"
+                                      className="h-8 w-8 rounded-lg border border-transparent flex items-center justify-center text-muted-foreground/70 hover:text-amber-500 hover:bg-amber-500/10 transition-all"
                                       onClick={(e) => e.stopPropagation()}
                                       title="Añadir a Google Calendar"
                                     >
                                       <CalendarPlus className="h-4 w-4" />
                                     </a>
                                     {role === "admin" && (
-                                      <button
-                                        className="h-8 w-8 rounded-lg flex items-center justify-center text-muted-foreground/40 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 opacity-0 group-hover:opacity-100 transition-all"
-                                        onClick={(e) => { 
-                                          e.stopPropagation(); 
-                                          setEventToDelete(event.id); 
-                                        }}
-                                        title="Eliminar evento"
-                                      >
-                                        <Trash2 className="h-4 w-4" />
-                                      </button>
+                                      <>
+                                        {onUpdateEvent && (
+                                          <button
+                                            className="h-8 w-8 rounded-lg flex items-center justify-center text-muted-foreground/60 hover:text-amber-500 hover:bg-amber-500/10 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-all"
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              handleOpenEditEvent(event);
+                                            }}
+                                            title="Editar evento"
+                                          >
+                                            <Edit2 className="h-4 w-4" />
+                                          </button>
+                                        )}
+                                        {onDuplicateEvent && (
+                                          <button
+                                            className="h-8 w-8 rounded-lg flex items-center justify-center text-muted-foreground/60 hover:text-blue-500 hover:bg-blue-500/10 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-all"
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              handleDuplicateEvent(event);
+                                            }}
+                                            title="Duplicar como plantilla (mesas, croquis y cronograma)"
+                                          >
+                                            <Copy className="h-4 w-4" />
+                                          </button>
+                                        )}
+                                        <button
+                                          className="h-8 w-8 rounded-lg flex items-center justify-center text-muted-foreground/60 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-all"
+                                          onClick={(e) => { 
+                                            e.stopPropagation(); 
+                                            setEventToDelete(event.id); 
+                                          }}
+                                          title="Eliminar evento"
+                                        >
+                                          <Trash2 className="h-4 w-4" />
+                                        </button>
+                                      </>
                                     )}
                                   </div>
                                 </div>
@@ -434,28 +593,28 @@ export function EventDashboard({ events, loading, onCreateEvent, onDeleteEvent, 
                                 <div className="flex items-center justify-between pt-5 border-t border-border mt-2">
                                   <div className="flex items-center gap-4">
                                     <div className="flex flex-col">
-                                      <span className="text-[10px] uppercase font-black text-slate-400 truncate">Invitados</span>
-                                      <span className="text-sm font-black text-foreground">{event.guests.length}</span>
+                                      <span className="text-[10px] uppercase font-black text-muted-foreground truncate">Esperados</span>
+                                      <span className="text-sm font-black text-foreground">{eventStats.totalExpected}</span>
                                     </div>
-                                    <div className="h-8 w-px bg-slate-100 dark:bg-slate-800" />
+                                    <div className="h-8 w-px bg-border" />
                                     <div className="flex flex-col">
-                                      <span className="text-[10px] uppercase font-black text-green-600/60 dark:text-green-400/60 truncate">Check-in</span>
-                                      <span className="text-sm font-black text-green-600 dark:text-green-400">{arrived}</span>
+                                      <span className="text-[10px] uppercase font-black text-green-600/80 dark:text-emerald-400/80 truncate">Check-in</span>
+                                      <span className="text-sm font-black text-green-600 dark:text-emerald-400">{eventStats.totalArrived}</span>
                                     </div>
                                   </div>
-                                  <div className="w-9 h-9 rounded-2xl bg-slate-50 dark:bg-slate-800 flex items-center justify-center group-hover:bg-amber-400 transition-all shadow-inner">
-                                    <ChevronRight className="h-4 w-4 text-slate-400 group-hover:text-black transition-colors" />
+                                  <div className="w-9 h-9 rounded-2xl bg-muted flex items-center justify-center group-hover:bg-amber-400 transition-all shadow-inner">
+                                    <ChevronRight className="h-4 w-4 text-muted-foreground group-hover:text-black transition-colors" />
                                   </div>
                                 </div>
 
                                 {/* Progress Bar */}
-                                {event.guests.length > 0 && (
+                                {eventStats.totalExpected > 0 && (
                                   <div className="mt-5">
                                     <div className="flex items-center justify-between mb-1.5 px-0.5">
-                                       <span className="text-[9px] font-black uppercase text-slate-400 tracking-wider">Logística de ingreso</span>
-                                       <span className="text-[9px] font-black text-green-600">{progress}%</span>
+                                       <span className="text-[9px] font-black uppercase text-muted-foreground tracking-wider">Logística de ingreso</span>
+                                       <span className="text-[9px] font-black text-green-600 dark:text-emerald-400">{progress}%</span>
                                     </div>
-                                    <div className="h-2 w-full bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden shadow-inner">
+                                    <div className="h-2 w-full bg-muted rounded-full overflow-hidden shadow-inner">
                                       <div
                                         className="h-full bg-gradient-to-r from-green-600 to-emerald-400 rounded-full transition-all duration-700 ease-out relative"
                                         style={{ width: `${progress}%` }}
@@ -475,9 +634,10 @@ export function EventDashboard({ events, loading, onCreateEvent, onDeleteEvent, 
             )}
           </div>
 
+
           {/* Sidebar with Calendar */}
           <div className="w-full lg:w-96 space-y-6">
-            <div className="p-6 rounded-3xl border border-border bg-white/70 dark:bg-slate-950/40 backdrop-blur-md shadow-xl sticky top-24">
+            <div className="p-6 rounded-3xl border border-border bg-card/85 dark:bg-card/90 backdrop-blur-md shadow-xl sticky top-24">
               <div className="flex items-center justify-between mb-6">
                 <h3 className="text-xs font-black text-foreground uppercase tracking-widest flex items-center gap-2">
                   <CalendarDays className="h-4 w-4 text-amber-500" />
@@ -488,7 +648,7 @@ export function EventDashboard({ events, loading, onCreateEvent, onDeleteEvent, 
                     variant="ghost" 
                     size="sm" 
                     onClick={() => setSelectedDashboardDate(undefined)}
-                    className="h-6 text-[10px] font-bold text-amber-600 hover:text-amber-700 hover:bg-amber-50 dark:hover:bg-amber-500/10 px-2 rounded-full border border-amber-200 dark:border-amber-700transition-all"
+                    className="h-6 text-[10px] font-bold text-amber-600 dark:text-amber-400 hover:text-amber-700 dark:hover:text-amber-300 hover:bg-amber-50 dark:hover:bg-amber-500/10 px-2 rounded-full border border-amber-200 dark:border-amber-500/40 transition-all"
                   >
                     Ver Todo
                   </Button>
@@ -535,11 +695,19 @@ export function EventDashboard({ events, loading, onCreateEvent, onDeleteEvent, 
         </div>
       </main>
 
-      {/* Create dialog */}
-      <Dialog open={showCreate} onOpenChange={setShowCreate}>
+      {/* Create / Edit dialog */}
+      <Dialog
+        open={showCreate}
+        onOpenChange={(open) => {
+          setShowCreate(open);
+          if (!open) setEditingEvent(null);
+        }}
+      >
         <DialogContent className="sm:max-w-md bg-card border-border">
           <DialogHeader>
-            <DialogTitle className="text-foreground">Nuevo Evento</DialogTitle>
+            <DialogTitle className="text-foreground">
+              {editingEvent ? "Editar Evento" : "Nuevo Evento"}
+            </DialogTitle>
           </DialogHeader>
           <form onSubmit={handleCreate} className="space-y-4">
             <div className="space-y-2">
@@ -585,11 +753,18 @@ export function EventDashboard({ events, loading, onCreateEvent, onDeleteEvent, 
               />
             </div>
             <DialogFooter className="gap-2">
-              <Button type="button" variant="outline" onClick={() => setShowCreate(false)}>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  setShowCreate(false);
+                  setEditingEvent(null);
+                }}
+              >
                 Cancelar
               </Button>
               <Button type="submit" className="bg-amber-400 hover:bg-amber-300 text-black font-semibold">
-                Crear Evento
+                {editingEvent ? "Guardar Cambios" : "Crear Evento"}
               </Button>
             </DialogFooter>
           </form>
@@ -695,7 +870,9 @@ export function EventDashboard({ events, loading, onCreateEvent, onDeleteEvent, 
                             <div className="flex items-center gap-3 min-w-0">
                               <div className={cn(
                                 "w-10 h-10 rounded-xl flex items-center justify-center font-black text-sm",
-                                u.role === "admin" ? "bg-black text-white" : "bg-amber-100 text-amber-700"
+                                u.role === "admin"
+                                  ? "bg-slate-900 text-white dark:bg-slate-800 dark:text-amber-400 dark:border dark:border-amber-400/30"
+                                  : "bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-300"
                               )}>
                                 {u.id.charAt(0).toUpperCase()}
                               </div>
@@ -703,7 +880,9 @@ export function EventDashboard({ events, loading, onCreateEvent, onDeleteEvent, 
                                 <p className="text-sm font-bold truncate">{u.id}</p>
                                 <Badge variant="outline" className={cn(
                                   "text-[9px] uppercase font-black px-1.5 h-4 border-none",
-                                  u.role === "admin" ? "bg-black/10 text-black dark:bg-white/10 dark:text-white" : "bg-amber-100 text-amber-700"
+                                  u.role === "admin"
+                                    ? "bg-black/10 text-black dark:bg-white/10 dark:text-white"
+                                    : "bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-300"
                                 )}>
                                   {u.role === "admin" ? "Administrador" : "Staff"}
                                 </Badge>
@@ -711,12 +890,12 @@ export function EventDashboard({ events, loading, onCreateEvent, onDeleteEvent, 
                             </div>
                             
                             <div className="flex items-center gap-2">
-                              {u.id !== "pepe.jlfc.16@gmail.com" && u.id !== "isaalexandra40@gmail.com" && (
+                              {!isOwnerEmail(u.id) && (
                                 <>
                                   <Button 
                                     variant="ghost" 
                                     size="icon" 
-                                    className={cn("h-9 w-9 rounded-xl", isEditing && "text-amber-600 bg-amber-100")}
+                                    className={cn("h-9 w-9 rounded-xl", isEditing && "text-amber-600 bg-amber-100 dark:text-amber-300 dark:bg-amber-500/20")}
                                     onClick={() => {
                                       if (isEditing) {
                                         setEditingUserId(null);
@@ -735,7 +914,7 @@ export function EventDashboard({ events, loading, onCreateEvent, onDeleteEvent, 
                                   <Button 
                                     variant="ghost" 
                                     size="icon" 
-                                    className="h-9 w-9 rounded-xl text-red-400 hover:text-red-500 hover:bg-red-50"
+                                    className="h-9 w-9 rounded-xl text-red-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10"
                                     onClick={() => handleDeleteUser(u.id)}
                                   >
                                     <Trash2 className="h-4 w-4" />
@@ -748,7 +927,7 @@ export function EventDashboard({ events, loading, onCreateEvent, onDeleteEvent, 
                           {isEditing && editingDraft && (
                             <div className="px-4 pb-5 pt-2 border-t border-amber-400/20 space-y-5 animate-in slide-in-from-top-2 duration-300">
                               <div className="space-y-3">
-                                <Label className="text-[10px] font-black uppercase text-amber-700 tracking-widest">Rol del Usuario</Label>
+                                <Label className="text-[10px] font-black uppercase text-amber-700 dark:text-amber-400 tracking-widest">Rol del Usuario</Label>
                                 <div className="flex gap-2">
                                   <Button 
                                     size="sm"
@@ -768,7 +947,7 @@ export function EventDashboard({ events, loading, onCreateEvent, onDeleteEvent, 
                                       role: "admin", 
                                       permissions: DEFAULT_ADMIN_PERMISSIONS 
                                     })}
-                                    className={cn("flex-1 h-8 text-[10px] font-bold uppercase", activeRole === "admin" && "bg-black text-white hover:bg-zinc-800")}
+                                    className={cn("flex-1 h-8 text-[10px] font-bold uppercase", activeRole === "admin" && "bg-slate-900 text-white hover:bg-slate-800 dark:bg-slate-100 dark:text-slate-950 dark:hover:bg-white")}
                                   >
                                     Asignar Admin
                                   </Button>
@@ -776,7 +955,7 @@ export function EventDashboard({ events, loading, onCreateEvent, onDeleteEvent, 
                               </div>
 
                               <div className="space-y-4">
-                                <Label className="text-[10px] font-black uppercase text-amber-700 tracking-widest">Permisos Individuales</Label>
+                                <Label className="text-[10px] font-black uppercase text-amber-700 dark:text-amber-400 tracking-widest">Permisos Individuales</Label>
                                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                                   <div className="flex items-center justify-between p-3 rounded-xl bg-background/50 border border-border/50">
                                     <div className="flex items-center gap-2">
@@ -957,7 +1136,7 @@ export function EventDashboard({ events, loading, onCreateEvent, onDeleteEvent, 
                         type="button"
                         variant={newRole === "admin" ? "default" : "outline"}
                         onClick={() => setNewRole("admin")}
-                        className={cn("flex-1 h-11 rounded-xl transition-all", newRole === "admin" && "bg-black text-white hover:bg-zinc-800 shadow-md scale-[1.02]")}
+                        className={cn("flex-1 h-11 rounded-xl transition-all", newRole === "admin" && "bg-slate-900 text-white hover:bg-slate-800 dark:bg-slate-100 dark:text-slate-950 dark:hover:bg-white shadow-md scale-[1.02]")}
                       >
                         Rol Admin
                       </Button>
@@ -999,10 +1178,17 @@ export function EventDashboard({ events, loading, onCreateEvent, onDeleteEvent, 
                         setNewEmail("");
                         setNewPassword("");
                         fetchUsers();
-                      } catch (e: any) {
+                      } catch (e: unknown) {
                         console.error(e);
                         let message = "Error al crear el usuario.";
-                        if (e.code === "auth/email-already-in-use") message = "Este correo ya está registrado.";
+                        if (
+                          typeof e === "object" &&
+                          e !== null &&
+                          "code" in e &&
+                          (e as { code?: string }).code === "auth/email-already-in-use"
+                        ) {
+                          message = "Este correo ya está registrado.";
+                        }
                         alert(message);
                       } finally {
                         if (tempApp) await deleteApp(tempApp);
@@ -1024,7 +1210,7 @@ export function EventDashboard({ events, loading, onCreateEvent, onDeleteEvent, 
 
           <div className="p-4 bg-muted/30 border-t border-border mt-auto">
             <p className="text-[10px] text-muted-foreground text-center italic">
-              Los cambios en permisos se aplican automáticamente el próximo login del usuario.
+              Los cambios en permisos y revocaciones se aplican en tiempo real.
             </p>
           </div>
         </DialogContent>
@@ -1032,3 +1218,4 @@ export function EventDashboard({ events, loading, onCreateEvent, onDeleteEvent, 
     </div>
   );
 }
+

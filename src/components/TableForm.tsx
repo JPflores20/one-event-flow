@@ -4,18 +4,19 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import type { TableShape } from "@/hooks/useEventStore";
 
 interface TableFormProps {
   open: boolean;
   onClose: () => void;
-  onSubmit: (name: string, capacity: number, shape?: "rect" | "square" | "circle" | "oval" | "diamond" | "triangle" | "hexagon" | "l-shape" | "l-shape-tl" | "l-shape-tr" | "l-shape-br") => void;
-  initialData?: { name?: string, capacity?: number, shape?: string } | null;
+  onSubmit: (name: string, capacity: number, shape?: TableShape) => void;
+  initialData?: { name?: string; capacity?: number; shape?: TableShape } | null;
 }
 
 export function TableForm({ open, onClose, onSubmit, initialData }: TableFormProps) {
   const [name, setName] = useState("");
   const [capacity, setCapacity] = useState("8");
-  const [shape, setShape] = useState<any>("rect");
+  const [shape, setShape] = useState<TableShape>("rect");
 
   useEffect(() => {
     if (open) {
@@ -69,7 +70,7 @@ export function TableForm({ open, onClose, onSubmit, initialData }: TableFormPro
           </div>
           <div className="space-y-2">
             <Label htmlFor="table-shape" className="text-foreground">Forma de la mesa</Label>
-            <Select value={shape} onValueChange={(val: any) => setShape(val)}>
+            <Select value={shape} onValueChange={(val: TableShape) => setShape(val)}>
               <SelectTrigger className="bg-background border-border focus:border-amber-400">
                 <SelectValue placeholder="Selecciona una forma" />
               </SelectTrigger>
@@ -85,6 +86,10 @@ export function TableForm({ open, onClose, onSubmit, initialData }: TableFormPro
                 <SelectItem value="l-shape-br">Forma en L (Abajo Derecha)</SelectItem>
                 <SelectItem value="l-shape-tl">Forma en L (Arriba Izquierda)</SelectItem>
                 <SelectItem value="l-shape-tr">Forma en L (Arriba Derecha)</SelectItem>
+                <SelectItem value="arc-tl">Semicircular (Arco Arriba Izq)</SelectItem>
+                <SelectItem value="arc-tr">Semicircular (Arco Arriba Der)</SelectItem>
+                <SelectItem value="arc-bl">Semicircular (Arco Abajo Izq)</SelectItem>
+                <SelectItem value="arc-br">Semicircular (Arco Abajo Der)</SelectItem>
               </SelectContent>
             </Select>
           </div>

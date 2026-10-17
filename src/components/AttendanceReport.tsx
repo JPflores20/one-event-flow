@@ -12,9 +12,9 @@ import {
   YAxis,
   CartesianGrid
 } from "recharts";
-import { Users, LogIn, Clock, XCircle, TrendingUp, Presentation } from "lucide-react";
+import { Users, LogIn, TrendingUp, Presentation } from "lucide-react";
 import type { EventData } from "@/hooks/useEventStore";
-import { cn } from "@/lib/utils";
+import { cn, calculateAttendanceStats } from "@/lib/utils";
 
 interface AttendanceReportProps {
   event: EventData;
@@ -22,35 +22,23 @@ interface AttendanceReportProps {
 
 export function AttendanceReport({ event }: AttendanceReportProps) {
   const stats = useMemo(() => {
-    const activeGuests = event.guests.filter(g => g.status !== "cancelled");
-    const arrivedCount = activeGuests.filter(g => g.status === "arrived").length;
-    const confirmedCount = activeGuests.filter(g => g.status === "confirmed").length;
-    const pendingCount = activeGuests.filter(g => g.status === "pending").length;
-    const cancelledCount = event.guests.filter(g => g.status === "cancelled").length;
-
-    const arrivedGuestsTotal = activeGuests
-      .filter(g => g.status === "arrived")
-      .reduce((sum, g) => sum + 1 + g.companions, 0);
-    
-    const totalExpected = activeGuests.reduce((sum, g) => sum + 1 + g.companions, 0);
+    const attendance = calculateAttendanceStats(event.guests);
 
     const pieData = [
-      { name: "Ingresaron", value: arrivedCount, color: "#10b981" },
-      { name: "Confirmados", value: confirmedCount, color: "#3b82f6" },
-      { name: "Pendientes", value: pendingCount, color: "#94a3b8" },
-    ].filter(d => d.value > 0);
-
-    const checkInPct = totalExpected > 0 ? Math.round((arrivedGuestsTotal / totalExpected) * 100) : 0;
+      { name: "Ingresaron", value: attendance.arrivedCount, color: "#10b981" },
+      { name: "Confirmados", value: attendance.confirmedCount, color: "#3b82f6" },
+      { name: "Pendientes", value: attendance.pendingCount, color: "#94a3b8" },
+    ].filter((d) => d.value > 0);
 
     return {
-      arrivedCount,
-      confirmedCount,
-      pendingCount,
-      cancelledCount,
-      arrivedGuestsTotal,
-      totalExpected,
+      arrivedCount: attendance.arrivedCount,
+      confirmedCount: attendance.confirmedCount,
+      pendingCount: attendance.pendingCount,
+      cancelledCount: attendance.cancelledCount,
+      arrivedGuestsTotal: attendance.totalArrived,
+      totalExpected: attendance.totalExpected,
       pieData,
-      checkInPct
+      checkInPct: attendance.checkInPct,
     };
   }, [event.guests]);
 

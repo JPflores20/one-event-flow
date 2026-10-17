@@ -1,11 +1,11 @@
 import { createContext, useContext, useEffect, useState } from "react";
-import { 
-  onAuthStateChanged, 
-  signInWithEmailAndPassword, 
+import {
+  onAuthStateChanged,
+  signInWithEmailAndPassword,
   signOut,
-  User 
+  User,
 } from "firebase/auth";
-import { doc, getDoc, setDoc } from "firebase/firestore";
+import { doc, getDoc, onSnapshot, setDoc } from "firebase/firestore";
 import { auth, db } from "../lib/firebase";
 
 export type UserRole = "admin" | "staff";
@@ -15,6 +15,16 @@ export interface UserPermissions {
   canEditCroquis: boolean;
   canManageGuests: boolean;
   canEditTimeline: boolean;
+}
+
+export const OWNER_EMAILS = [
+  "pepe.jlfc.16@gmail.com",
+  "isaalexandra40@gmail.com",
+] as const;
+
+export function isOwnerEmail(email?: string | null): boolean {
+  if (!email) return false;
+  return (OWNER_EMAILS as readonly string[]).includes(email.toLowerCase().trim());
 }
 
 export const DEFAULT_ADMIN_PERMISSIONS: UserPermissions = {
@@ -31,10 +41,12 @@ export const DEFAULT_STAFF_PERMISSIONS: UserPermissions = {
   canEditTimeline: true,
 };
 
-interface UserProfile {
+export interface AuthorizedUserRecord {
+  id: string;
   role: UserRole;
-  email: string;
   permissions?: UserPermissions;
+  invitedBy?: string;
+  createdAt?: string;
 }
 
 interface AuthContextType {
@@ -55,66 +67,125 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (u) => {
-      setUser(u);
-      if (u) {
-        // Fetch role and permissions from Firestore
-        const userRef = doc(db, "users", u.uid);
-        const userDoc = await getDoc(userRef);
-        
-        if (userDoc.exists()) {
-          const data = userDoc.data() as UserProfile;
-          let currentRole = data.role;
-          let currentPerms = data.permissions || (data.role === "admin" ? DEFAULT_ADMIN_PERMISSIONS : DEFAULT_STAFF_PERMISSIONS);
-          
-          if (u.email === "pepe.jlfc.16@gmail.com" || u.email === "isaalexandra40@gmail.com") {
-             if (currentRole !== "admin") {
-                currentRole = "admin";
-                currentPerms = DEFAULT_ADMIN_PERMISSIONS;
-                await setDoc(userRef, { role: "admin", permissions: DEFAULT_ADMIN_PERMISSIONS }, { merge: true });
-             }
-          }
+    let unsubscribeAuthDoc: (() => void) | null = null;
 
-          setRole(currentRole);
-          setPermissions(currentPerms);
-        } else {
-          // Check if this email is pre-authorized
-          const authRef = doc(db, "authorized_emails", u.email?.toLowerCase() || "");
-          const authDoc = await getDoc(authRef);
-          
-          let initialRole: UserRole = "staff"; // Safer default
-          let initialPerms: UserPermissions = DEFAULT_STAFF_PERMISSIONS;
-          
-          if (authDoc.exists()) {
-            const authData = authDoc.data() as any;
-            initialRole = authData.role;
-            initialPerms = authData.permissions || (initialRole === "admin" ? DEFAULT_ADMIN_PERMISSIONS : DEFAULT_STAFF_PERMISSIONS);
-          } else if (u.email === "pepe.jlfc.16@gmail.com" || u.email === "isaalexandra40@gmail.com") {
-             // Hardcoded admin for owner
-             initialRole = "admin";
-             initialPerms = DEFAULT_ADMIN_PERMISSIONS;
-          }
-          
-          await setDoc(userRef, {
-            email: u.email,
-            role: initialRole,
-            permissions: initialPerms,
-            createdAt: new Date().toISOString()
-          });
-          setRole(initialRole);
-          setPermissions(initialPerms);
-        }
-      } else {
+    const unsubscribeAuth = onAuthStateChanged(auth, (u) => {
+      if (unsubscribeAuthDoc) {
+        unsubscribeAuthDoc();
+        unsubscribeAuthDoc = null;
+      }
+
+      if (!u || !u.email) {
+        setUser(null);
         setRole(null);
         setPermissions(null);
+        setLoading(false);
+        return;
       }
-      setLoading(false);
+
+      const normalizedEmail = u.email.toLowerCase().trim();
+      const userRef = doc(db, "users", u.uid);
+      const authRef = doc(db, "authorized_emails", normalizedEmail);
+
+      unsubscribeAuthDoc = onSnapshot(
+        authRef,
+        async (authSnap) => {
+          try {
+            if (isOwnerEmail(normalizedEmail)) {
+              setUser(u);
+              setRole("admin");
+              setPermissions(DEFAULT_ADMIN_PERMISSIONS);
+              setLoading(false);
+
+              await setDoc(
+                userRef,
+                {
+                  email: normalizedEmail,
+                  role: "admin",
+                  permissions: DEFAULT_ADMIN_PERMISSIONS,
+                },
+                { merge: true }
+              );
+              if (!authSnap.exists()) {
+                await setDoc(
+                  authRef,
+                  {
+                    role: "admin",
+                    permissions: DEFAULT_ADMIN_PERMISSIONS,
+                    createdAt: new Date().toISOString(),
+                  },
+                  { merge: true }
+                );
+              }
+              return;
+            }
+
+            if (!authSnap.exists()) {
+              // Access was revoked or email is not authorized
+              setUser(null);
+              setRole(null);
+              setPermissions(null);
+              setLoading(false);
+              await signOut(auth);
+              return;
+            }
+
+            const authData = authSnap.data() as Partial<AuthorizedUserRecord>;
+            const currentRole: UserRole = authData.role === "admin" ? "admin" : "staff";
+            const currentPerms: UserPermissions =
+              currentRole === "admin"
+                ? DEFAULT_ADMIN_PERMISSIONS
+                : authData.permissions || DEFAULT_STAFF_PERMISSIONS;
+
+            setUser(u);
+            setRole(currentRole);
+            setPermissions(currentPerms);
+            setLoading(false);
+
+            await setDoc(
+              userRef,
+              {
+                email: normalizedEmail,
+                role: currentRole,
+                permissions: currentPerms,
+              },
+              { merge: true }
+            );
+          } catch (err) {
+            console.error("Error syncing user profile:", err);
+            setLoading(false);
+          }
+        },
+        (error) => {
+          console.error("Error listening to user permissions:", error);
+          if (isOwnerEmail(normalizedEmail)) {
+            setUser(u);
+            setRole("admin");
+            setPermissions(DEFAULT_ADMIN_PERMISSIONS);
+          }
+          setLoading(false);
+        }
+      );
     });
-    return () => unsubscribe();
+
+    return () => {
+      if (unsubscribeAuthDoc) unsubscribeAuthDoc();
+      unsubscribeAuth();
+    };
   }, []);
 
   const login = async (email: string, pass: string) => {
-    await signInWithEmailAndPassword(auth, email, pass);
+    const normalizedEmail = email.toLowerCase().trim();
+    const credential = await signInWithEmailAndPassword(auth, normalizedEmail, pass);
+    if (!isOwnerEmail(normalizedEmail)) {
+      const authRef = doc(db, "authorized_emails", normalizedEmail);
+      const authSnap = await getDoc(authRef);
+      if (!authSnap.exists()) {
+        await signOut(auth);
+        throw new Error("Tu acceso ha sido revocado o tu correo no está autorizado.");
+      }
+    }
+    setUser(credential.user);
   };
 
   const logout = async () => {
@@ -131,3 +202,4 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 export function useAuth() {
   return useContext(AuthContext);
 }
+

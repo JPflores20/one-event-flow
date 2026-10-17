@@ -5,16 +5,17 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Shapes } from "lucide-react";
+import type { ElementShape } from "@/hooks/useEventStore";
 
 interface ElementFormProps {
   open: boolean;
   onClose: () => void;
-  onSubmit: (name: string, shape: "rect" | "square" | "circle" | "line-h" | "line-v") => void;
+  onSubmit: (name: string, shape: ElementShape) => void;
 }
 
 export function ElementForm({ open, onClose, onSubmit }: ElementFormProps) {
   const [name, setName] = useState("");
-  const [shape, setShape] = useState<"rect" | "square" | "circle" | "line-h" | "line-v">("rect");
+  const [shape, setShape] = useState<ElementShape>("rect");
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -48,7 +49,7 @@ export function ElementForm({ open, onClose, onSubmit }: ElementFormProps) {
           </div>
           <div className="space-y-2">
             <Label htmlFor="element-shape">Figura principal</Label>
-            <Select value={shape} onValueChange={(val: any) => setShape(val)}>
+            <Select value={shape} onValueChange={(val: ElementShape) => setShape(val)}>
               <SelectTrigger>
                 <SelectValue placeholder="Selecciona una figura" />
               </SelectTrigger>

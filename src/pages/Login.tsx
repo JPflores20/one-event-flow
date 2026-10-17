@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Moon, Sun, Sparkles } from "lucide-react";
+import { Moon, Sun, Sparkles, Eye, EyeOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useAuth } from "@/hooks/useAuth";
@@ -9,6 +9,7 @@ import { useTheme } from "@/hooks/useTheme";
 export default function Login() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const { login } = useAuth();
   const { theme, toggleTheme } = useTheme();
   const [error, setError] = useState("");
@@ -23,8 +24,9 @@ export default function Login() {
       setError("");
       await login(email, password);
       navigate("/", { replace: true });
-    } catch (err: any) {
-      setError(err.message || "Error al iniciar sesión.");
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Error al iniciar sesión.";
+      setError(message);
     } finally {
       setLoading(false);
     }
@@ -35,10 +37,11 @@ export default function Login() {
       {/* Theme toggle top-right */}
       <button
         onClick={toggleTheme}
-        className="fixed top-4 right-4 p-2 rounded-full border border-border bg-card text-muted-foreground hover:text-foreground hover:bg-muted transition-all"
+        className="fixed top-4 right-4 p-2.5 rounded-full border border-border bg-card text-muted-foreground hover:text-foreground hover:bg-muted transition-all shadow-sm"
         aria-label="Cambiar tema"
+        title={theme === "dark" ? "Cambiar a modo claro" : "Cambiar a modo oscuro"}
       >
-        {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+        {theme === "dark" ? <Sun className="h-4 w-4 text-amber-400" /> : <Moon className="h-4 w-4" />}
       </button>
 
       <div className="w-full max-w-sm space-y-6">
@@ -54,7 +57,7 @@ export default function Login() {
         </div>
 
         {/* Card */}
-        <div className="bg-card border border-border rounded-2xl p-6 shadow-sm space-y-4">
+        <div className="bg-card/90 backdrop-blur-sm border border-border rounded-2xl p-6 shadow-lg dark:shadow-black/40 space-y-4">
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-3">
               <Input
@@ -65,14 +68,28 @@ export default function Login() {
                 className="h-11 bg-background border-border text-foreground placeholder:text-muted-foreground focus:border-amber-400 focus:ring-amber-400/20"
                 required
               />
-              <Input
-                type="password"
-                placeholder="Contraseña"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="h-11 bg-background border-border text-foreground placeholder:text-muted-foreground focus:border-amber-400 focus:ring-amber-400/20"
-                required
-              />
+              <div className="relative">
+                <Input
+                  type={showPassword ? "text" : "password"}
+                  placeholder="Contraseña"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="h-11 bg-background border-border text-foreground placeholder:text-muted-foreground focus:border-amber-400 focus:ring-amber-400/20 pr-10"
+                  required
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+                  aria-label={showPassword ? "Ocultar contraseña" : "Mostrar contraseña"}
+                >
+                  {showPassword ? (
+                    <EyeOff className="h-4 w-4" />
+                  ) : (
+                    <Eye className="h-4 w-4" />
+                  )}
+                </button>
+              </div>
             </div>
 
             {error && (
